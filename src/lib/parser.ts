@@ -14,18 +14,20 @@ export function parseLevels(text: string, subject?: string): ParsedPlan {
   const bullTargets = extractScenarioTargets(text, "bull");
   const bearTargets = extractScenarioTargets(text, "bear");
   const triggers = extractTriggers(text);
-  const sessionDate = extractSessionDate(subject || text);
+  // Try subject first, then body, then fall back to next trading day
+  const sessionDate =
+    (subject ? extractDateFromText(subject) : null) ||
+    extractDateFromText(text) ||
+    fallbackNextTradingDay();
 
   return { supports, resistances, lean, bullTargets, bearTargets, triggers, sessionDate };
 }
 
 /**
- * Extract the session date from the email subject or body.
- * Mancini subjects look like: "April 22 Plan", "April 23rd Plan", "4/22 Plan"
- * The date in the subject is the day the plan APPLIES TO (the next trading day).
- * Falls back to next trading day if no date found.
+ * Try to extract a session date from text.
+ * Returns YYYY-MM-DD string if found, null otherwise.
  */
-function extractSessionDate(text: string): string {
+function extractDateFromText(text: string): string | null {
   const currentYear = new Date().getFullYear();
 
   // Match "Month Day" patterns: "April 22", "April 22nd", "Apr 22"
@@ -35,28 +37,39 @@ function extractSessionDate(text: string): string {
   if (monthDayMatch) {
     const parsed = new Date(`${monthDayMatch[1]} ${monthDayMatch[2]}, ${currentYear}`);
     if (!isNaN(parsed.getTime())) {
-      return parsed.toISOString().split("T")[0];
+      // Use UTC-safe formatting to avoid timezone shifts
+      const month = String(parsed.getMonth() + 1).padStart(2, "0");
+      const day = String(parsed.getDate()).padStart(2, "0");
+      return `${currentYear}-${month}-${day}`;
     }
   }
 
   // Match "M/D" patterns: "4/22", "04/22"
   const slashMatch = text.match(/\b(\d{1,2})\/(\d{1,2})\b/);
   if (slashMatch) {
-    const month = parseInt(slashMatch[1]) - 1;
+    const month = parseInt(slashMatch[1]);
     const day = parseInt(slashMatch[2]);
-    const parsed = new Date(currentYear, month, day);
-    if (!isNaN(parsed.getTime())) {
-      return parsed.toISOString().split("T")[0];
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${currentYear}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     }
   }
 
-  // Fallback: next trading day (skip weekends)
+  return null;
+}
+
+/**
+ * Fallback: next trading day (skip weekends).
+ */
+function fallbackNextTradingDay(): string {
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   while (tomorrow.getDay() === 0 || tomorrow.getDay() === 6) {
     tomorrow.setDate(tomorrow.getDate() + 1);
   }
-  return tomorrow.toISOString().split("T")[0];
+  const y = tomorrow.getFullYear();
+  const m = String(tomorrow.getMonth() + 1).padStart(2, "0");
+  const d = String(tomorrow.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 function extractLevels(text: string, type: "support" | "resistance"): Level[] {
