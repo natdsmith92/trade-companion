@@ -28,7 +28,7 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   // Public routes that don't require auth
-  const publicPaths = ["/login", "/signup", "/api/ingest", "/api/health"];
+  const publicPaths = ["/login", "/signup", "/auth/callback", "/api/ingest", "/api/health"];
   const isPublic = publicPaths.some((p) => request.nextUrl.pathname.startsWith(p));
 
   // If not logged in and trying to access protected route, redirect to login
