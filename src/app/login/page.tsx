@@ -192,14 +192,7 @@ export default function LoginPage() {
         {/* ── Brand mark ── */}
         <div className="login-brand" style={{ textAlign: "center", marginBottom: "32px", position: "relative", zIndex: 1 }}>
           <div style={{ marginBottom: "14px", display: "flex", justifyContent: "center" }}>
-            <svg width="34" height="34" viewBox="0 0 36 36" fill="none">
-              <rect x="8" y="4" width="2.5" height="28" rx="1.25" fill="rgba(251,191,36,0.5)" />
-              <rect x="25.5" y="4" width="2.5" height="28" rx="1.25" fill="rgba(251,191,36,0.5)" />
-              <rect x="10.5" y="9"  width="15" height="2" rx="1" fill="rgba(251,191,36,0.85)" />
-              <rect x="10.5" y="15" width="15" height="2" rx="1" fill="rgba(251,191,36,0.3)" />
-              <rect x="10.5" y="21" width="15" height="2" rx="1" fill="rgba(251,191,36,0.5)" />
-              <rect x="10.5" y="27" width="15" height="2" rx="1" fill="rgba(251,191,36,0.18)" />
-            </svg>
+            <img src="/logo.svg" alt="TradeLadder" style={{ height: "48px", width: "auto", filter: "drop-shadow(0 0 12px rgba(251,191,36,0.15))" }} />
           </div>
           <div className="brand-shimmer" style={{
             fontFamily: "'JetBrains Mono', monospace",

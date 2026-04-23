@@ -214,8 +214,11 @@ export default function Dashboard() {
       {/* ─────── HEADER ─────── */}
       <header className="hdr">
         <div className="hdr-br">
-          <div className="hdr-br-n">Trade Companion</div>
-          <div className="hdr-br-date">{todayLabel}</div>
+          <img src="/logo.svg" alt="Trade Companion" className="hdr-logo" />
+          <div>
+            <div className="hdr-br-n">Trade Companion</div>
+            <div className="hdr-br-date">{todayLabel}</div>
+          </div>
         </div>
 
         <div className="hdr-plan-date">
@@ -362,6 +365,7 @@ export default function Dashboard() {
                 triggers={parsed?.triggers || []}
                 supports={parsed?.supports || []}
                 currentPrice={currentPrice}
+                sessionDate={sessionDate}
               />
             )}
             {activeTab === "trades" && (

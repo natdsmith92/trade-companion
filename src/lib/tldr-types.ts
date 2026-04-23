@@ -18,7 +18,16 @@ export interface TldrSection {
   insights: TldrInsight[];
 }
 
+export interface FbSetup {
+  level: number;
+  quality: "A+" | "A" | "B" | "Watch";
+  action: string;   // HTML string — concise action instruction
+  context: string;  // HTML string — why this level matters
+  invalidation: string; // what kills the setup
+}
+
 export interface TldrData {
   stats: TldrStat[];
   sections: TldrSection[];
+  fbSetups?: FbSetup[];
 }

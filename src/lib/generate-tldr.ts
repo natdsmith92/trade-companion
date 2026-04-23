@@ -71,7 +71,31 @@ Formatting rules for the "text" field in each insight:
 - Abbreviate "Failed Breakdown" as "FB" always
 - Use → for directional flows (e.g. "6700 → 6716 → 6738")
 - Keep each insight to 1-3 sentences max
-- The "If Boring" scenario should always conclude with do nothing / hold runners / wait`;
+- The "If Boring" scenario should always conclude with do nothing / hold runners / wait
+
+Additionally, include a top-level "fbSetups" array — polished Failed Breakdown (FB) setup recommendations extracted from the email. For each FB setup mentioned:
+
+{
+  "fbSetups": [
+    {
+      "level": 7147,
+      "quality": "A+",
+      "action": "Buy if price flushes below <span class=\"num\">7147</span> and <strong>recovers back above within 15 minutes</strong>",
+      "context": "12:50PM low set — FB here targets <span class=\"num\">7180</span> → <span class=\"num\">7200</span>",
+      "invalidation": "Closes below 7130 on 15m candle"
+    }
+  ]
+}
+
+Rules for fbSetups:
+- Extract EVERY specific FB level or FB watch mentioned in the email
+- quality: "A+" = high quality pre-planned FB, "A" = decent FB with confirmation, "B" = low quality / needs extra confirmation, "Watch" = just monitor, not a direct trade
+- action: What exactly to do — be specific about entry trigger (flush + recover pattern)
+- context: Why this level matters — reference how it formed, target levels after FB triggers
+- invalidation: What kills the setup — a close below, time decay, etc.
+- If the email says "I would NOT buy X again" — mark it as "Watch" quality with explanation
+- If no FB setups are mentioned, return an empty array []
+- Wrap prices in <span class="num">PRICE</span>, key actions in <strong>bold</strong>`;
 
 export async function generateTldr(
   planId: string,
@@ -88,7 +112,7 @@ export async function generateTldr(
   try {
     const message = await client.messages.create({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 2048,
+      max_tokens: 3072,
       system: SYSTEM_PROMPT,
       messages: [
         {
@@ -117,6 +141,11 @@ export async function generateTldr(
     if (!tldr.stats || !tldr.sections || !Array.isArray(tldr.stats) || !Array.isArray(tldr.sections)) {
       console.error("Invalid TL;DR structure from Claude");
       return null;
+    }
+
+    // Ensure fbSetups is at least an empty array
+    if (!tldr.fbSetups || !Array.isArray(tldr.fbSetups)) {
+      tldr.fbSetups = [];
     }
 
     // Write to database
