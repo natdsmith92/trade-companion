@@ -37,11 +37,15 @@
   --bull-dim: var(--bull-d);
   --bear-dim: var(--bear-d);
   --blue-bright: var(--blue-b);
+  --gold-dim: #fbbf2466;
+  --blue-dim: #60a5fa66;
 
   --f: "Inter", system-ui, sans-serif;
   --m: "JetBrains Mono", "SF Mono", Consolas, monospace;
   --r: 10px;
   --rl: 14px;
+
+  color-scheme: dark;
 }
 
 * {
@@ -72,6 +76,15 @@ body {
 
 .mono {
   font-family: var(--m);
+}
+
+::selection {
+  background: rgba(251, 191, 36, 0.3);
+  color: #fff;
+}
+
+input::placeholder {
+  color: var(--t4);
 }
 
 /* ───── Shell ───── */
@@ -1034,5 +1047,50 @@ body {
 .pnl-unreal {
   font-style: italic;
   opacity: 0.85;
+}
+
+/* ───── TL;DR Skeleton Loading ───── */
+.tldr-skeleton {
+  animation: skel-fade 1.5s ease-in-out infinite;
+}
+@keyframes skel-fade {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.tldr-stat.skel,
+.tldr-insight.skel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skel-line {
+  background: var(--bg-3);
+  border-radius: 4px;
+  height: 14px;
+}
+.skel-short {
+  width: 60%;
+  height: 12px;
+}
+.skel-big {
+  width: 40%;
+  height: 28px;
+}
+.skel-title {
+  width: 35%;
+  height: 14px;
+  margin-bottom: 10px;
+}
+.skel-tag {
+  width: 70px;
+  height: 20px;
+  border-radius: 4px;
+}
+.skel-text {
+  width: 100%;
+  height: 16px;
+}
+.skel-text-short {
+  width: 65%;
 }
 

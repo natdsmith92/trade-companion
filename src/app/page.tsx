@@ -368,7 +368,7 @@ export default function Dashboard() {
               <TradeStats trades={trades} currentPrice={currentPrice} />
             )}
             {activeTab === "tldr" && (
-              <TldrTab parsed={parsed} currentPrice={currentPrice} />
+              <TldrTab sessionDate={sessionDate} />
             )}
           </div>
         </section>
