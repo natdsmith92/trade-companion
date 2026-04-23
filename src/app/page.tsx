@@ -15,6 +15,7 @@ import {
   NewTradeModal,
   EditTradeModal,
 } from "@/components/TradeLog";
+import { useESPrice } from "@/hooks/useESPrice";
 
 const TABS = ["plan", "trades", "tldr"] as const;
 type Tab = (typeof TABS)[number];
@@ -33,8 +34,12 @@ export default function Dashboard() {
   const [userId, setUserId] = useState<string>("");
 
   const [parsed, setParsed] = useState<ParsedPlan | null>(null);
-  const [currentPriceStr, setCurrentPriceStr] = useState<string>("");
+  const [manualPriceStr, setManualPriceStr] = useState<string>("");
+  const [manualOverride, setManualOverride] = useState(false);
   const [trades, setTrades] = useState<Trade[]>([]);
+
+  // Live ES price feed
+  const esPrice = useESPrice();
 
   const [sessionDate, setSessionDate] = useState<string>("");
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -149,22 +154,39 @@ export default function Dashboard() {
     setTrades(trades.map((x) => (x.id === t.id ? t : x)));
   }
 
-  const currentPrice = parseFloat(currentPriceStr) || 0;
+  // Price priority: manual override > live feed > 0
+  const manualPrice = parseFloat(manualPriceStr) || 0;
+  const currentPrice = manualOverride && manualPrice > 0 ? manualPrice : esPrice.price;
+  const priceSource: "live" | "manual" | "none" =
+    manualOverride && manualPrice > 0 ? "manual" : esPrice.price > 0 ? "live" : "none";
 
   // Live P&L (realized + open runner unrealized)
-  const sessionPnL = trades.reduce((sum, t) => {
-    let pnl = t.pnl ?? 0;
+  let realizedPnL = 0;
+  let unrealizedPnL = 0;
+  for (const t of trades) {
+    realizedPnL += t.pnl ?? 0;
+    // Unrealized for open runners (75% exited, runner still open)
     if (t.exit_75_price && !t.exit_runner_price && currentPrice > 0) {
       const sign = t.direction === "long" ? 1 : -1;
-      pnl +=
+      unrealizedPnL +=
         (currentPrice - t.entry_price) *
         sign *
         t.contracts *
         0.25 *
         t.point_value;
     }
-    return sum + pnl;
-  }, 0);
+    // Unrealized for fully open trades (no exits at all)
+    if (!t.exit_75_price && !t.exit_runner_price && currentPrice > 0) {
+      const sign = t.direction === "long" ? 1 : -1;
+      unrealizedPnL +=
+        (currentPrice - t.entry_price) *
+        sign *
+        t.contracts *
+        t.point_value;
+    }
+  }
+  const sessionPnL = realizedPnL + unrealizedPnL;
+  const hasOpenTrades = unrealizedPnL !== 0;
 
   const todayLabel = new Date().toLocaleDateString("en-US", {
     weekday: "short",
@@ -231,10 +253,44 @@ export default function Dashboard() {
           <input
             type="number"
             className="hdr-p-i"
-            value={currentPriceStr}
-            onChange={(e) => setCurrentPriceStr(e.target.value)}
+            value={manualOverride ? manualPriceStr : currentPrice > 0 ? currentPrice.toString() : ""}
+            onChange={(e) => {
+              setManualPriceStr(e.target.value);
+              setManualOverride(true);
+            }}
+            onFocus={() => {
+              if (!manualOverride && currentPrice > 0) {
+                setManualPriceStr(currentPrice.toString());
+                setManualOverride(true);
+              }
+            }}
             placeholder="0000"
           />
+          {priceSource === "live" && (
+            <div className="hdr-p-badge live">
+              <span className="hdr-p-dot live" />
+              LIVE
+            </div>
+          )}
+          {priceSource === "manual" && (
+            <div className="hdr-p-badge manual">
+              <span className="hdr-p-dot manual" />
+              MANUAL
+              <button
+                className="hdr-p-clear"
+                onClick={() => { setManualOverride(false); setManualPriceStr(""); }}
+                title="Clear override, return to live feed"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+          {esPrice.isStale && priceSource === "live" && (
+            <div className="hdr-p-badge stale">
+              <span className="hdr-p-dot stale" />
+              STALE
+            </div>
+          )}
         </div>
 
         <div className="hdr-pnl">
@@ -247,7 +303,19 @@ export default function Dashboard() {
             {Math.abs(Math.round(sessionPnL)).toLocaleString()}
           </div>
           <div className="hdr-pnl-l">
-            Day P&amp;L · {trades.length} trade{trades.length !== 1 ? "s" : ""}
+            {hasOpenTrades ? (
+              <>
+                <span className="hdr-pnl-real">
+                  {realizedPnL >= 0 ? "+" : "-"}${Math.abs(Math.round(realizedPnL)).toLocaleString()} realized
+                </span>
+                {" · "}
+                <span className={unrealizedPnL >= 0 ? "hdr-pnl-upos" : "hdr-pnl-uneg"}>
+                  {unrealizedPnL >= 0 ? "+" : "-"}${Math.abs(Math.round(unrealizedPnL)).toLocaleString()} open
+                </span>
+              </>
+            ) : (
+              <>Day P&amp;L · {trades.length} trade{trades.length !== 1 ? "s" : ""}</>
+            )}
           </div>
         </div>
 
@@ -265,6 +333,7 @@ export default function Dashboard() {
           supports={parsed?.supports || []}
           resistances={parsed?.resistances || []}
           currentPrice={currentPrice}
+          priceSource={priceSource}
           onPaste={() => setShowPaste(true)}
         />
 

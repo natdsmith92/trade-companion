@@ -1,38 +1,64 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import { Level } from "@/lib/types";
 
 interface Props {
   supports: Level[];
   resistances: Level[];
   currentPrice: number;
+  priceSource: "live" | "manual" | "none";
   onPaste: () => void;
 }
 
-export default function LevelLadder({ supports, resistances, currentPrice, onPaste }: Props) {
+export default function LevelLadder({
+  supports,
+  resistances,
+  currentPrice,
+  priceSource,
+  onPaste,
+}: Props) {
   const priceRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Center the price bar after each render so the price stays visible.
+  const allLevels = useMemo(() => {
+    return [
+      ...supports.map((l) => ({ ...l, t: "S" as const })),
+      ...resistances.map((l) => ({ ...l, t: "R" as const })),
+    ].sort((a, b) => b.price - a.price);
+  }, [supports, resistances]);
+
+  // Find the nearest level to current price for highlighting
+  const nearestPrice = useMemo(() => {
+    if (currentPrice <= 0 || allLevels.length === 0) return null;
+    let closest = allLevels[0].price;
+    let minDist = Math.abs(allLevels[0].price - currentPrice);
+    for (const l of allLevels) {
+      const dist = Math.abs(l.price - currentPrice);
+      if (dist < minDist) {
+        minDist = dist;
+        closest = l.price;
+      }
+    }
+    return closest;
+  }, [allLevels, currentPrice]);
+
+  // Auto-scroll to keep price zone visible
   useEffect(() => {
     if (!priceRef.current || !scrollRef.current) return;
     priceRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [supports, resistances, currentPrice]);
 
-  const allLevels = [
-    ...supports.map((l) => ({ ...l, t: "S" as const })),
-    ...resistances.map((l) => ({ ...l, t: "R" as const })),
-  ].sort((a, b) => b.price - a.price);
+  // Above current price: show closest 22
+  const above =
+    currentPrice > 0
+      ? allLevels.filter((l) => l.price > currentPrice).slice(-22)
+      : allLevels.slice(0, Math.floor(allLevels.length / 2));
 
-  // Above current price: show closest 22 (closest to price first when sorted ascending).
-  const above = currentPrice > 0
-    ? allLevels.filter((l) => l.price > currentPrice).slice(-22)
-    : allLevels.slice(0, Math.floor(allLevels.length / 2));
-
-  const below = currentPrice > 0
-    ? allLevels.filter((l) => l.price <= currentPrice).slice(0, 35)
-    : allLevels.slice(Math.floor(allLevels.length / 2));
+  const below =
+    currentPrice > 0
+      ? allLevels.filter((l) => l.price <= currentPrice).slice(0, 35)
+      : allLevels.slice(Math.floor(allLevels.length / 2));
 
   const empty = supports.length === 0 && resistances.length === 0;
 
@@ -55,19 +81,32 @@ export default function LevelLadder({ supports, resistances, currentPrice, onPas
         ) : (
           <>
             {above.map((l, i) => (
-              <Row key={`a-${l.price}-${l.t}-${i}`} level={l} />
+              <Row
+                key={`a-${l.price}-${l.t}-${i}`}
+                level={l}
+                isNearest={l.price === nearestPrice}
+              />
             ))}
 
             <div className="pbw" ref={priceRef}>
               {currentPrice > 0 ? (
-                <div className="pb">ES&nbsp;&nbsp;{currentPrice}</div>
+                <div className={`pb${priceSource === "live" ? " pulse" : ""}`}>
+                  ES&nbsp;&nbsp;{currentPrice}
+                  {priceSource === "live" && (
+                    <span className="pb-live-dot" />
+                  )}
+                </div>
               ) : (
                 <div className="pb empty">Enter ES price ↑</div>
               )}
             </div>
 
             {below.map((l, i) => (
-              <Row key={`b-${l.price}-${l.t}-${i}`} level={l} />
+              <Row
+                key={`b-${l.price}-${l.t}-${i}`}
+                level={l}
+                isNearest={l.price === nearestPrice}
+              />
             ))}
           </>
         )}
@@ -76,9 +115,21 @@ export default function LevelLadder({ supports, resistances, currentPrice, onPas
   );
 }
 
-function Row({ level }: { level: Level & { t: "S" | "R" } }) {
+function Row({
+  level,
+  isNearest,
+}: {
+  level: Level & { t: "S" | "R" };
+  isNearest: boolean;
+}) {
   const { major, t, price } = level;
-  const cls = ["lr", major ? "mj" : ""].filter(Boolean).join(" ");
+  const cls = [
+    "lr",
+    major ? "mj" : "",
+    isNearest ? "bd" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div className={cls}>

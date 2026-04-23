@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { Level } from "@/lib/types";
 
 interface Props {
@@ -8,6 +9,19 @@ interface Props {
   triggers: string[];
   supports: Level[];
   currentPrice: number;
+}
+
+// Extract all 4-5 digit numbers from a trigger string
+function extractPrices(text: string): number[] {
+  const matches = text.match(/\b\d{4,5}\b/g);
+  return matches ? matches.map(Number) : [];
+}
+
+// Check if any price in the trigger is within proximity of current price
+function isTriggerActive(text: string, currentPrice: number, threshold = 15): boolean {
+  if (currentPrice <= 0) return false;
+  const prices = extractPrices(text);
+  return prices.some((p) => Math.abs(p - currentPrice) <= threshold);
 }
 
 export default function GamePlan({
@@ -22,6 +36,16 @@ export default function GamePlan({
     bearTargets.length === 0 &&
     triggers.length === 0 &&
     supports.length === 0;
+
+  // Memoize active trigger indices
+  const activeTriggers = useMemo(() => {
+    if (currentPrice <= 0) return new Set<number>();
+    return new Set(
+      triggers
+        .map((t, i) => (isTriggerActive(t, currentPrice) ? i : -1))
+        .filter((i) => i >= 0)
+    );
+  }, [triggers, currentPrice]);
 
   if (empty) {
     return (
@@ -51,9 +75,17 @@ export default function GamePlan({
           <ul className="sl">
             {bullTargets.map((target, i) => {
               const hit = currentPrice > 0 && currentPrice >= target;
+              const isNext =
+                !hit &&
+                currentPrice > 0 &&
+                i > 0 &&
+                currentPrice >= bullTargets[i - 1];
               const isLast = i === bullTargets.length - 1;
               return (
-                <li key={target} className={`si${hit ? " hit" : ""}`}>
+                <li
+                  key={target}
+                  className={`si${hit ? " hit" : ""}${isNext ? " next-target" : ""}`}
+                >
                   <div className="bul" />
                   <div>
                     {i === 0 ? "Target " : "Then "}
@@ -79,9 +111,17 @@ export default function GamePlan({
           <ul className="sl">
             {bearTargets.map((target, i) => {
               const hit = currentPrice > 0 && currentPrice <= target;
+              const isNext =
+                !hit &&
+                currentPrice > 0 &&
+                i > 0 &&
+                currentPrice <= bearTargets[i - 1];
               const isLast = i === bearTargets.length - 1;
               return (
-                <li key={target} className={`si${hit ? " hit" : ""}`}>
+                <li
+                  key={target}
+                  className={`si${hit ? " hit" : ""}${isNext ? " next-target" : ""}`}
+                >
                   <div className="bul" />
                   <div>
                     {i === 0 ? "Down to " : "Then "}
@@ -105,7 +145,10 @@ export default function GamePlan({
           <div className="nt">No setups parsed from email</div>
         ) : (
           triggers.map((t, i) => (
-            <div key={i} className="ti">
+            <div
+              key={i}
+              className={`ti${activeTriggers.has(i) ? " ti-active" : ""}`}
+            >
               {highlightNumbers(t)}
             </div>
           ))

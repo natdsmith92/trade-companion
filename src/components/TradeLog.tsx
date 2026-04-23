@@ -31,9 +31,13 @@ function formatTime(iso: string | null | undefined): string {
 // Realized + unrealized P&L for a single trade.
 // stored `pnl` already includes any partial 75% exit. For an open runner
 // we add an unrealized 25% leg using the current ES price.
-function liveTradePnL(t: Trade, currentPrice: number): number {
+// For a fully open trade (no exits), we show full unrealized P&L.
+function liveTradePnL(t: Trade, currentPrice: number): { total: number; hasUnrealized: boolean } {
   let pnl = t.pnl ?? 0;
+  let hasUnrealized = false;
+
   if (t.exit_75_price && !t.exit_runner_price && currentPrice > 0) {
+    // Open runner
     const sign = t.direction === "long" ? 1 : -1;
     pnl +=
       (currentPrice - t.entry_price) *
@@ -41,8 +45,19 @@ function liveTradePnL(t: Trade, currentPrice: number): number {
       t.contracts *
       0.25 *
       t.point_value;
+    hasUnrealized = true;
+  } else if (!t.exit_75_price && !t.exit_runner_price && currentPrice > 0) {
+    // Fully open trade
+    const sign = t.direction === "long" ? 1 : -1;
+    pnl =
+      (currentPrice - t.entry_price) *
+      sign *
+      t.contracts *
+      t.point_value;
+    hasUnrealized = true;
   }
-  return pnl;
+
+  return { total: pnl, hasUnrealized };
 }
 
 /* ──────────────────────────────────────────────
@@ -93,8 +108,8 @@ export function TradeBar({
         </div>
       ) : (
         trades.map((tr) => {
-          const pnl = liveTradePnL(tr, currentPrice);
-          const showPnl = tr.exit_75_price !== null || tr.exit_runner_price !== null;
+          const { total: pnl, hasUnrealized } = liveTradePnL(tr, currentPrice);
+          const showPnl = tr.exit_75_price !== null || tr.exit_runner_price !== null || hasUnrealized;
           const pnlText = showPnl
             ? pnl >= 0
               ? `+$${Math.round(pnl).toLocaleString()}`
@@ -123,7 +138,13 @@ export function TradeBar({
                 <span className="sp">{tr.setup_type ?? "FB"}</span>
               </div>
               <div className={pnl >= 0 ? "pg" : "pr"}>
-                {showPnl ? pnlText : <span style={{ color: "var(--t4)" }}>—</span>}
+                {showPnl ? (
+                  <span className={hasUnrealized ? "pnl-unreal" : ""}>
+                    {pnlText}
+                  </span>
+                ) : (
+                  <span style={{ color: "var(--t4)" }}>—</span>
+                )}
               </div>
               <div>
                 <button className="dx" onClick={() => onEdit(tr.id)} title="Update exits">
@@ -156,7 +177,7 @@ export function TradeStats({
   let wins = 0;
   let losses = 0;
   for (const t of trades) {
-    const pnl = liveTradePnL(t, currentPrice);
+    const { total: pnl } = liveTradePnL(t, currentPrice);
     total += pnl;
     if (t.exit_75_price !== null || t.exit_runner_price !== null) {
       if (pnl >= 0) wins++;
