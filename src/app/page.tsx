@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { parseLevels } from "@/lib/parser";
-import { createBrowserSupabase } from "@/lib/supabase";
+import { createBrowserSupabase } from "@/lib/supabase-browser";
 import { ParsedPlan, Trade, Session } from "@/lib/types";
 import LevelLadder from "@/components/LevelLadder";
 import GamePlan from "@/components/GamePlan";

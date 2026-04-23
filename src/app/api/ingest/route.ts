@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminSupabase } from "@/lib/supabase";
+import { createAdminSupabase } from "@/lib/supabase-server";
 import { parseLevels } from "@/lib/parser";
 
 // Webhook endpoint — called by Zapier, not by a logged-in user
