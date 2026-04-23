@@ -1,4 +1,6 @@
-import yahooFinance from "yahoo-finance2";
+import YahooFinance from "yahoo-finance2";
+
+const yf = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
 
 interface PriceCache {
   price: number;
@@ -29,7 +31,7 @@ export async function GET() {
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const quote: any = await yahooFinance.quote("ES=F");
+    const quote: any = await yf.quote("ES=F");
     cache = {
       price: quote.regularMarketPrice ?? 0,
       change: quote.regularMarketChange ?? 0,
