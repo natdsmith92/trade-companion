@@ -7,27 +7,43 @@ import { createBrowserSupabase } from "@/lib/supabase-browser";
 import { ParsedPlan, Trade, Session } from "@/lib/types";
 import LevelLadder from "@/components/LevelLadder";
 import GamePlan from "@/components/GamePlan";
-import TradeLog from "@/components/TradeLog";
+import TldrTab from "@/components/TldrTab";
 import PasteModal from "@/components/PasteModal";
+import {
+  TradeBar,
+  TradeStats,
+  NewTradeModal,
+  EditTradeModal,
+} from "@/components/TradeLog";
 
-const TABS = ["Levels", "Game Plan", "Trade Log"] as const;
+const TABS = ["plan", "trades", "tldr"] as const;
 type Tab = (typeof TABS)[number];
 
+const TAB_LABELS: Record<Tab, string> = {
+  plan: "Game Plan",
+  trades: "Trade Log",
+  tldr: "TL;DR",
+};
+
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<Tab>("Levels");
+  const router = useRouter();
+
+  const [activeTab, setActiveTab] = useState<Tab>("plan");
   const [userEmail, setUserEmail] = useState<string>("");
   const [userId, setUserId] = useState<string>("");
-  const router = useRouter();
+
   const [parsed, setParsed] = useState<ParsedPlan | null>(null);
-  const [currentPrice, setCurrentPrice] = useState<string>("");
-  const [showPaste, setShowPaste] = useState(false);
+  const [currentPriceStr, setCurrentPriceStr] = useState<string>("");
   const [trades, setTrades] = useState<Trade[]>([]);
 
-  // Session management
   const [sessionDate, setSessionDate] = useState<string>("");
   const [sessions, setSessions] = useState<Session[]>([]);
 
-  // Load user info on mount
+  const [showPaste, setShowPaste] = useState(false);
+  const [showNewTrade, setShowNewTrade] = useState(false);
+  const [editTradeId, setEditTradeId] = useState<string | null>(null);
+
+  // Auth
   useEffect(() => {
     const supabase = createBrowserSupabase();
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -45,38 +61,29 @@ export default function Dashboard() {
     router.refresh();
   }
 
-  // Load all available sessions on mount
+  // Load all sessions on mount
   useEffect(() => {
     fetch("/api/sessions")
       .then((r) => (r.ok ? r.json() : []))
       .then((data: Session[]) => {
         setSessions(data);
-        // Load the most recent session by default
-        if (data.length > 0) {
-          setSessionDate(data[0].session_date);
-        }
+        if (data.length > 0) setSessionDate(data[0].session_date);
       })
       .catch(() => {});
   }, []);
 
-  // Load plan + trades whenever sessionDate changes
+  // Load plan + trades for current session
   const loadSession = useCallback((date: string) => {
     if (!date) return;
 
-    // Fetch plan for this session
     fetch(`/api/latest-plan?date=${date}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data?.body) {
-          const result = parseLevels(data.body, data.subject);
-          setParsed(result);
-        } else {
-          setParsed(null);
-        }
+        if (data?.body) setParsed(parseLevels(data.body, data.subject));
+        else setParsed(null);
       })
       .catch(() => setParsed(null));
 
-    // Fetch trades for this session
     fetch(`/api/trades?date=${date}`)
       .then((r) => (r.ok ? r.json() : []))
       .then(setTrades)
@@ -87,11 +94,9 @@ export default function Dashboard() {
     if (sessionDate) loadSession(sessionDate);
   }, [sessionDate, loadSession]);
 
-  // Navigate sessions
   function navigateSession(direction: -1 | 1) {
-    const currentIdx = sessions.findIndex((s) => s.session_date === sessionDate);
-    // Sessions are sorted newest first, so -1 = newer, +1 = older
-    const newIdx = currentIdx - direction;
+    const idx = sessions.findIndex((s) => s.session_date === sessionDate);
+    const newIdx = idx - direction;
     if (newIdx >= 0 && newIdx < sessions.length) {
       setSessionDate(sessions[newIdx].session_date);
     }
@@ -103,7 +108,6 @@ export default function Dashboard() {
     setSessionDate(result.sessionDate);
     setShowPaste(false);
 
-    // Store in Supabase with user_id
     fetch("/api/ingest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -118,7 +122,6 @@ export default function Dashboard() {
       .then((data) => {
         if (data.session_date) {
           setSessionDate(data.session_date);
-          // Refresh sessions list
           fetch("/api/sessions")
             .then((r) => (r.ok ? r.json() : []))
             .then(setSessions)
@@ -128,223 +131,206 @@ export default function Dashboard() {
       .catch(() => {});
   }
 
-  const price = parseFloat(currentPrice) || 0;
+  async function handleDeleteTrade(id: string) {
+    if (!confirm("Delete this trade?")) return;
+    try {
+      await fetch(`/api/trades/${id}`, { method: "DELETE" });
+      setTrades(trades.filter((t) => t.id !== id));
+    } catch {
+      // silent
+    }
+  }
 
-  // Calculate session P&L
-  const sessionPnL = trades
-    .filter((t) => t.pnl !== null)
-    .reduce((sum, t) => sum + (t.pnl || 0), 0);
+  function handleTradeCreated(t: Trade) {
+    setTrades([t, ...trades]);
+  }
 
-  // Format session date for display
-  const displayDate = sessionDate
+  function handleTradeUpdated(t: Trade) {
+    setTrades(trades.map((x) => (x.id === t.id ? t : x)));
+  }
+
+  const currentPrice = parseFloat(currentPriceStr) || 0;
+
+  // Live P&L (realized + open runner unrealized)
+  const sessionPnL = trades.reduce((sum, t) => {
+    let pnl = t.pnl ?? 0;
+    if (t.exit_75_price && !t.exit_runner_price && currentPrice > 0) {
+      const sign = t.direction === "long" ? 1 : -1;
+      pnl +=
+        (currentPrice - t.entry_price) *
+        sign *
+        t.contracts *
+        0.25 *
+        t.point_value;
+    }
+    return sum + pnl;
+  }, 0);
+
+  const todayLabel = new Date().toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  const planLabel = sessionDate
     ? new Date(sessionDate + "T12:00:00").toLocaleDateString("en-US", {
-        weekday: "short",
-        month: "short",
+        weekday: "long",
+        month: "long",
         day: "numeric",
-        year: "numeric",
       })
-    : "No session loaded";
+    : "—";
 
-  const currentIdx = sessions.findIndex((s) => s.session_date === sessionDate);
-  const canGoNewer = currentIdx > 0;
-  const canGoOlder = currentIdx < sessions.length - 1;
+  const idx = sessions.findIndex((s) => s.session_date === sessionDate);
+  const canGoNewer = idx > 0;
+  const canGoOlder = idx < sessions.length - 1 && idx >= 0;
+
+  const editTrade = trades.find((t) => t.id === editTradeId) || null;
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden">
-      {/* HEADER */}
-      <header
-        className="flex items-center gap-5 px-6 py-3 border-b"
-        style={{ background: "var(--bg-1)", borderColor: "var(--border-light)" }}
-      >
-        <div className="pr-4 border-r" style={{ borderColor: "var(--border)" }}>
-          <div
-            className="text-xs font-extrabold tracking-[3px] uppercase"
-            style={{ color: "var(--text-3)" }}
-          >
-            TradeLadder
-          </div>
+    <div className="app">
+      {/* ─────── HEADER ─────── */}
+      <header className="hdr">
+        <div className="hdr-br">
+          <div className="hdr-br-n">Trade Companion</div>
+          <div className="hdr-br-date">{todayLabel}</div>
         </div>
 
-        {/* Date Navigator */}
-        <div
-          className="flex items-center gap-1 px-3 py-2 rounded-lg"
-          style={{ background: "var(--gold-bg)", border: "1px solid rgba(251,191,36,.2)" }}
-        >
+        <div className="hdr-plan-date">
           <button
+            className="hdr-plan-nav"
             onClick={() => navigateSession(1)}
             disabled={!canGoOlder}
-            className="px-2 py-0.5 rounded text-lg font-bold transition-opacity"
-            style={{
-              color: "var(--gold)",
-              opacity: canGoOlder ? 1 : 0.2,
-              background: "none",
-              border: "none",
-              cursor: canGoOlder ? "pointer" : "default",
-            }}
+            title="Older session"
           >
             ◄
           </button>
-          <div className="text-center min-w-[180px]">
-            <div
-              className="text-[10px] font-bold uppercase tracking-[2px]"
-              style={{ color: "var(--gold)" }}
-            >
-              Session
-            </div>
-            <div className="text-sm font-extrabold mt-0.5">{displayDate}</div>
+          <div className="hdr-plan-block">
+            <div className="hdr-plan-label">Plan For</div>
+            <div className="hdr-plan-val">{planLabel}</div>
           </div>
           <button
+            className="hdr-plan-nav"
             onClick={() => navigateSession(-1)}
             disabled={!canGoNewer}
-            className="px-2 py-0.5 rounded text-lg font-bold transition-opacity"
-            style={{
-              color: "var(--gold)",
-              opacity: canGoNewer ? 1 : 0.2,
-              background: "none",
-              border: "none",
-              cursor: canGoNewer ? "pointer" : "default",
-            }}
+            title="Newer session"
           >
             ►
           </button>
         </div>
 
-        {/* Lean */}
-        {parsed?.lean && (
-          <div className="flex-1 min-w-0">
-            <div
-              className="text-[10px] font-bold uppercase tracking-[2px] mb-0.5"
-              style={{ color: "var(--gold)" }}
-            >
-              Lean
-            </div>
-            <div className="text-sm font-medium truncate">{parsed.lean}</div>
+        <div className="hdr-lean">
+          <div className="hdr-lean-l">Directional Lean</div>
+          <div className="hdr-lean-t">
+            {parsed?.lean || "Paste an email to load today's lean"}
           </div>
-        )}
+        </div>
 
-        {/* Current Price Input */}
-        <div
-          className="flex items-baseline gap-2 rounded-lg px-3 py-2 transition-all"
-          style={{ background: "var(--bg-2)", border: "2px solid var(--border-light)" }}
-        >
-          <span className="text-sm font-bold" style={{ color: "var(--text-3)" }}>
-            ES
-          </span>
+        <div className="hdr-p">
+          <div className="hdr-p-l">ES</div>
           <input
             type="number"
-            value={currentPrice}
-            onChange={(e) => setCurrentPrice(e.target.value)}
+            className="hdr-p-i"
+            value={currentPriceStr}
+            onChange={(e) => setCurrentPriceStr(e.target.value)}
             placeholder="0000"
-            className="mono text-2xl font-extrabold bg-transparent border-none outline-none w-24 text-right"
-            style={{ color: "var(--blue-bright)" }}
           />
         </div>
 
-        {/* P&L */}
-        <div
-          className="text-right min-w-[120px] pl-4 border-l"
-          style={{ borderColor: "var(--border)" }}
-        >
+        <div className="hdr-pnl">
           <div
-            className="mono text-2xl font-extrabold leading-none"
-            style={{
-              color:
-                sessionPnL > 0
-                  ? "var(--bull)"
-                  : sessionPnL < 0
-                  ? "var(--bear)"
-                  : "var(--text-3)",
-            }}
+            className={`hdr-pnl-v ${
+              sessionPnL > 0 ? "pos" : sessionPnL < 0 ? "neg" : "flat"
+            }`}
           >
-            {sessionPnL >= 0 ? "+" : ""}${sessionPnL.toLocaleString()}
+            {sessionPnL >= 0 ? "+" : "-"}$
+            {Math.abs(Math.round(sessionPnL)).toLocaleString()}
           </div>
-          <div className="text-xs mt-0.5" style={{ color: "var(--text-3)" }}>
-            Session P&L
+          <div className="hdr-pnl-l">
+            Day P&amp;L · {trades.length} trade{trades.length !== 1 ? "s" : ""}
           </div>
         </div>
 
-        {/* User */}
-        <div className="pl-4 border-l flex items-center gap-3" style={{ borderColor: "var(--border)" }}>
-          <div className="text-xs truncate max-w-[120px]" style={{ color: "var(--text-4)" }}>
-            {userEmail}
-          </div>
-          <button
-            onClick={handleSignOut}
-            className="text-xs px-3 py-1 rounded border hover:opacity-80"
-            style={{ borderColor: "var(--border)", color: "var(--text-4)" }}
-          >
+        <div className="hdr-user">
+          <div className="hdr-user-email">{userEmail}</div>
+          <button className="btn b-d b-sm" onClick={handleSignOut}>
             Sign out
           </button>
         </div>
       </header>
 
-      {/* TABS + ACTIONS */}
-      <div
-        className="flex items-center border-b px-4"
-        style={{ background: "var(--bg-1)", borderColor: "var(--border-light)" }}
-      >
-        <div className="flex">
-          {TABS.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className="px-5 py-3 text-xs font-bold tracking-[2px] uppercase border-b-[3px] transition-all"
-              style={{
-                color: activeTab === tab ? "var(--text-1)" : "var(--text-3)",
-                borderBottomColor:
-                  activeTab === tab ? "var(--gold)" : "transparent",
-                background: "none",
-              }}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
-        <div className="flex-1" />
-        <div className="flex gap-2 items-center">
-          {/* Session count */}
-          <span className="text-xs mr-2" style={{ color: "var(--text-4)" }}>
-            {sessions.length} sessions
-          </span>
-          <button
-            onClick={() => setShowPaste(true)}
-            className="px-4 py-2 text-xs font-bold rounded-lg border-2 transition-all hover:opacity-80"
-            style={{ borderColor: "var(--blue)", color: "var(--blue)" }}
-          >
-            📋 Paste Email
-          </button>
-        </div>
+      {/* ─────── MAIN: ladder + right panel ─────── */}
+      <div className="main">
+        <LevelLadder
+          supports={parsed?.supports || []}
+          resistances={parsed?.resistances || []}
+          currentPrice={currentPrice}
+          onPaste={() => setShowPaste(true)}
+        />
+
+        <section className="rp">
+          <div className="tabs">
+            {TABS.map((t) => (
+              <button
+                key={t}
+                className={`tab${activeTab === t ? " on" : ""}`}
+                onClick={() => setActiveTab(t)}
+              >
+                {TAB_LABELS[t]}
+              </button>
+            ))}
+            <div style={{ flex: 1 }} />
+            <span className="hdr-user-email" style={{ marginRight: 12 }}>
+              {sessions.length} session{sessions.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+
+          <div className="tc">
+            {activeTab === "plan" && (
+              <GamePlan
+                bullTargets={parsed?.bullTargets || []}
+                bearTargets={parsed?.bearTargets || []}
+                triggers={parsed?.triggers || []}
+                supports={parsed?.supports || []}
+                currentPrice={currentPrice}
+              />
+            )}
+            {activeTab === "trades" && (
+              <TradeStats trades={trades} currentPrice={currentPrice} />
+            )}
+            {activeTab === "tldr" && (
+              <TldrTab parsed={parsed} currentPrice={currentPrice} />
+            )}
+          </div>
+        </section>
       </div>
 
-      {/* CONTENT */}
-      <main className="flex-1 overflow-y-auto p-5" style={{ background: "var(--bg-0)" }}>
-        {activeTab === "Levels" && (
-          <LevelLadder
-            supports={parsed?.supports || []}
-            resistances={parsed?.resistances || []}
-            currentPrice={price}
-          />
-        )}
-        {activeTab === "Game Plan" && (
-          <GamePlan
-            bullTargets={parsed?.bullTargets || []}
-            bearTargets={parsed?.bearTargets || []}
-            triggers={parsed?.triggers || []}
-            currentPrice={price}
-          />
-        )}
-        {activeTab === "Trade Log" && (
-          <TradeLog
-            trades={trades}
-            setTrades={setTrades}
-            sessionDate={sessionDate}
-          />
-        )}
-      </main>
+      {/* ─────── BOTTOM TRADE BAR ─────── */}
+      <TradeBar
+        trades={trades}
+        currentPrice={currentPrice}
+        onNew={() => setShowNewTrade(true)}
+        onEdit={(id) => setEditTradeId(id)}
+        onDelete={handleDeleteTrade}
+      />
 
-      {/* PASTE MODAL */}
+      {/* ─────── MODALS ─────── */}
       {showPaste && (
         <PasteModal onSubmit={handlePaste} onClose={() => setShowPaste(false)} />
+      )}
+      {showNewTrade && (
+        <NewTradeModal
+          sessionDate={sessionDate}
+          onClose={() => setShowNewTrade(false)}
+          onCreated={handleTradeCreated}
+        />
+      )}
+      {editTrade && (
+        <EditTradeModal
+          trade={editTrade}
+          onClose={() => setEditTradeId(null)}
+          onUpdated={handleTradeUpdated}
+        />
       )}
     </div>
   );
