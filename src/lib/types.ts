@@ -6,6 +6,7 @@ export interface Level {
 
 export interface Plan {
   id: string;
+  session_date: string;
   email_date: string;
   subject: string;
   body: string;
@@ -14,6 +15,7 @@ export interface Plan {
 
 export interface Trade {
   id: string;
+  session_date: string;
   symbol: string;
   direction: "long" | "short";
   contracts: number;
@@ -34,4 +36,10 @@ export interface ParsedPlan {
   bullTargets: number[];
   bearTargets: number[];
   triggers: string[];
+  sessionDate: string;
+}
+
+export interface Session {
+  session_date: string;
+  subject: string;
 }

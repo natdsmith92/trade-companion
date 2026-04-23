@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { parseLevels } from "@/lib/parser";
-import { ParsedPlan, Level, Trade } from "@/lib/types";
+import { ParsedPlan, Trade, Session } from "@/lib/types";
 import LevelLadder from "@/components/LevelLadder";
 import GamePlan from "@/components/GamePlan";
 import TradeLog from "@/components/TradeLog";
@@ -16,36 +16,71 @@ export default function Dashboard() {
   const [parsed, setParsed] = useState<ParsedPlan | null>(null);
   const [currentPrice, setCurrentPrice] = useState<string>("");
   const [showPaste, setShowPaste] = useState(false);
-  const [planDate, setPlanDate] = useState<string>("");
   const [trades, setTrades] = useState<Trade[]>([]);
 
-  // Load latest plan from Supabase on mount
+  // Session management
+  const [sessionDate, setSessionDate] = useState<string>("");
+  const [sessions, setSessions] = useState<Session[]>([]);
+
+  // Load all available sessions on mount
   useEffect(() => {
-    fetch("/api/latest-plan")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data?.body) {
-          const result = parseLevels(data.body);
-          setParsed(result);
-          setPlanDate(data.email_date || data.created_at);
+    fetch("/api/sessions")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: Session[]) => {
+        setSessions(data);
+        // Load the most recent session by default
+        if (data.length > 0) {
+          setSessionDate(data[0].session_date);
         }
       })
       .catch(() => {});
+  }, []);
 
-    // Load trades
-    fetch("/api/trades")
+  // Load plan + trades whenever sessionDate changes
+  const loadSession = useCallback((date: string) => {
+    if (!date) return;
+
+    // Fetch plan for this session
+    fetch(`/api/latest-plan?date=${date}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.body) {
+          const result = parseLevels(data.body, data.subject);
+          setParsed(result);
+        } else {
+          setParsed(null);
+        }
+      })
+      .catch(() => setParsed(null));
+
+    // Fetch trades for this session
+    fetch(`/api/trades?date=${date}`)
       .then((r) => (r.ok ? r.json() : []))
       .then(setTrades)
-      .catch(() => {});
+      .catch(() => setTrades([]));
   }, []);
+
+  useEffect(() => {
+    if (sessionDate) loadSession(sessionDate);
+  }, [sessionDate, loadSession]);
+
+  // Navigate sessions
+  function navigateSession(direction: -1 | 1) {
+    const currentIdx = sessions.findIndex((s) => s.session_date === sessionDate);
+    // Sessions are sorted newest first, so -1 = newer, +1 = older
+    const newIdx = currentIdx - direction;
+    if (newIdx >= 0 && newIdx < sessions.length) {
+      setSessionDate(sessions[newIdx].session_date);
+    }
+  }
 
   function handlePaste(text: string) {
     const result = parseLevels(text);
     setParsed(result);
-    setPlanDate(new Date().toLocaleDateString());
+    setSessionDate(result.sessionDate);
     setShowPaste(false);
 
-    // Also store in Supabase
+    // Store in Supabase
     fetch("/api/ingest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -54,46 +89,109 @@ export default function Dashboard() {
         subject: "Manual Paste",
         body: text,
       }),
-    }).catch(() => {});
-  }
-
-  function handleClearDay() {
-    setParsed(null);
-    setCurrentPrice("");
-    setPlanDate("");
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.session_date) {
+          setSessionDate(data.session_date);
+          // Refresh sessions list
+          fetch("/api/sessions")
+            .then((r) => (r.ok ? r.json() : []))
+            .then(setSessions)
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
   }
 
   const price = parseFloat(currentPrice) || 0;
 
-  // Calculate today's P&L from trades
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const todayPnL = trades
-    .filter((t) => new Date(t.created_at) >= todayStart && t.pnl !== null)
+  // Calculate session P&L
+  const sessionPnL = trades
+    .filter((t) => t.pnl !== null)
     .reduce((sum, t) => sum + (t.pnl || 0), 0);
+
+  // Format session date for display
+  const displayDate = sessionDate
+    ? new Date(sessionDate + "T12:00:00").toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "No session loaded";
+
+  const currentIdx = sessions.findIndex((s) => s.session_date === sessionDate);
+  const canGoNewer = currentIdx > 0;
+  const canGoOlder = currentIdx < sessions.length - 1;
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       {/* HEADER */}
-      <header className="flex items-center gap-5 px-6 py-3 border-b" style={{ background: "var(--bg-1)", borderColor: "var(--border-light)" }}>
+      <header
+        className="flex items-center gap-5 px-6 py-3 border-b"
+        style={{ background: "var(--bg-1)", borderColor: "var(--border-light)" }}
+      >
         <div className="pr-4 border-r" style={{ borderColor: "var(--border)" }}>
-          <div className="text-xs font-extrabold tracking-[3px] uppercase" style={{ color: "var(--text-3)" }}>
+          <div
+            className="text-xs font-extrabold tracking-[3px] uppercase"
+            style={{ color: "var(--text-3)" }}
+          >
             TradeLadder
           </div>
         </div>
 
-        {planDate && (
-          <div className="px-4 py-2 rounded-lg text-center" style={{ background: "var(--gold-bg)", border: "1px solid rgba(251,191,36,.2)" }}>
-            <div className="text-[10px] font-bold uppercase tracking-[2px]" style={{ color: "var(--gold)" }}>
-              Plan Date
+        {/* Date Navigator */}
+        <div
+          className="flex items-center gap-1 px-3 py-2 rounded-lg"
+          style={{ background: "var(--gold-bg)", border: "1px solid rgba(251,191,36,.2)" }}
+        >
+          <button
+            onClick={() => navigateSession(1)}
+            disabled={!canGoOlder}
+            className="px-2 py-0.5 rounded text-lg font-bold transition-opacity"
+            style={{
+              color: "var(--gold)",
+              opacity: canGoOlder ? 1 : 0.2,
+              background: "none",
+              border: "none",
+              cursor: canGoOlder ? "pointer" : "default",
+            }}
+          >
+            ◄
+          </button>
+          <div className="text-center min-w-[180px]">
+            <div
+              className="text-[10px] font-bold uppercase tracking-[2px]"
+              style={{ color: "var(--gold)" }}
+            >
+              Session
             </div>
-            <div className="text-sm font-extrabold mt-0.5">{planDate}</div>
+            <div className="text-sm font-extrabold mt-0.5">{displayDate}</div>
           </div>
-        )}
+          <button
+            onClick={() => navigateSession(-1)}
+            disabled={!canGoNewer}
+            className="px-2 py-0.5 rounded text-lg font-bold transition-opacity"
+            style={{
+              color: "var(--gold)",
+              opacity: canGoNewer ? 1 : 0.2,
+              background: "none",
+              border: "none",
+              cursor: canGoNewer ? "pointer" : "default",
+            }}
+          >
+            ►
+          </button>
+        </div>
 
+        {/* Lean */}
         {parsed?.lean && (
           <div className="flex-1 min-w-0">
-            <div className="text-[10px] font-bold uppercase tracking-[2px] mb-0.5" style={{ color: "var(--gold)" }}>
+            <div
+              className="text-[10px] font-bold uppercase tracking-[2px] mb-0.5"
+              style={{ color: "var(--gold)" }}
+            >
               Lean
             </div>
             <div className="text-sm font-medium truncate">{parsed.lean}</div>
@@ -105,7 +203,9 @@ export default function Dashboard() {
           className="flex items-baseline gap-2 rounded-lg px-3 py-2 transition-all"
           style={{ background: "var(--bg-2)", border: "2px solid var(--border-light)" }}
         >
-          <span className="text-sm font-bold" style={{ color: "var(--text-3)" }}>ES</span>
+          <span className="text-sm font-bold" style={{ color: "var(--text-3)" }}>
+            ES
+          </span>
           <input
             type="number"
             value={currentPrice}
@@ -117,19 +217,34 @@ export default function Dashboard() {
         </div>
 
         {/* P&L */}
-        <div className="text-right min-w-[120px] pl-4 border-l" style={{ borderColor: "var(--border)" }}>
+        <div
+          className="text-right min-w-[120px] pl-4 border-l"
+          style={{ borderColor: "var(--border)" }}
+        >
           <div
             className="mono text-2xl font-extrabold leading-none"
-            style={{ color: todayPnL > 0 ? "var(--bull)" : todayPnL < 0 ? "var(--bear)" : "var(--text-3)" }}
+            style={{
+              color:
+                sessionPnL > 0
+                  ? "var(--bull)"
+                  : sessionPnL < 0
+                  ? "var(--bear)"
+                  : "var(--text-3)",
+            }}
           >
-            {todayPnL >= 0 ? "+" : ""}${todayPnL.toLocaleString()}
+            {sessionPnL >= 0 ? "+" : ""}${sessionPnL.toLocaleString()}
           </div>
-          <div className="text-xs mt-0.5" style={{ color: "var(--text-3)" }}>Today P&L</div>
+          <div className="text-xs mt-0.5" style={{ color: "var(--text-3)" }}>
+            Session P&L
+          </div>
         </div>
       </header>
 
       {/* TABS + ACTIONS */}
-      <div className="flex items-center border-b px-4" style={{ background: "var(--bg-1)", borderColor: "var(--border-light)" }}>
+      <div
+        className="flex items-center border-b px-4"
+        style={{ background: "var(--bg-1)", borderColor: "var(--border-light)" }}
+      >
         <div className="flex">
           {TABS.map((tab) => (
             <button
@@ -138,7 +253,8 @@ export default function Dashboard() {
               className="px-5 py-3 text-xs font-bold tracking-[2px] uppercase border-b-[3px] transition-all"
               style={{
                 color: activeTab === tab ? "var(--text-1)" : "var(--text-3)",
-                borderBottomColor: activeTab === tab ? "var(--gold)" : "transparent",
+                borderBottomColor:
+                  activeTab === tab ? "var(--gold)" : "transparent",
                 background: "none",
               }}
             >
@@ -147,20 +263,17 @@ export default function Dashboard() {
           ))}
         </div>
         <div className="flex-1" />
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          {/* Session count */}
+          <span className="text-xs mr-2" style={{ color: "var(--text-4)" }}>
+            {sessions.length} sessions
+          </span>
           <button
             onClick={() => setShowPaste(true)}
             className="px-4 py-2 text-xs font-bold rounded-lg border-2 transition-all hover:opacity-80"
             style={{ borderColor: "var(--blue)", color: "var(--blue)" }}
           >
             📋 Paste Email
-          </button>
-          <button
-            onClick={handleClearDay}
-            className="px-4 py-2 text-xs font-bold rounded-lg border-2 transition-all hover:opacity-80"
-            style={{ borderColor: "var(--bear)", color: "var(--bear)" }}
-          >
-            Clear Day
           </button>
         </div>
       </div>
@@ -183,16 +296,17 @@ export default function Dashboard() {
           />
         )}
         {activeTab === "Trade Log" && (
-          <TradeLog trades={trades} setTrades={setTrades} />
+          <TradeLog
+            trades={trades}
+            setTrades={setTrades}
+            sessionDate={sessionDate}
+          />
         )}
       </main>
 
       {/* PASTE MODAL */}
       {showPaste && (
-        <PasteModal
-          onSubmit={handlePaste}
-          onClose={() => setShowPaste(false)}
-        />
+        <PasteModal onSubmit={handlePaste} onClose={() => setShowPaste(false)} />
       )}
     </div>
   );

@@ -16,9 +16,10 @@ const SETUPS = ["Failed Breakdown", "Flag", "Trendline", "Other"] as const;
 interface Props {
   trades: Trade[];
   setTrades: (trades: Trade[]) => void;
+  sessionDate: string;
 }
 
-export default function TradeLog({ trades, setTrades }: Props) {
+export default function TradeLog({ trades, setTrades, sessionDate }: Props) {
   const [showNew, setShowNew] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -38,6 +39,7 @@ export default function TradeLog({ trades, setTrades }: Props) {
 
     const pointValue = SYMBOLS.find((s) => s.name === symbol)?.pointValue || 50;
     const trade = {
+      session_date: sessionDate,
       symbol,
       direction,
       entry_price: parseFloat(entryPrice),

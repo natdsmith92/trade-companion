@@ -4,8 +4,9 @@
 -- ══════════════════════════════════════════════
 
 -- Plans table: stores each daily Mancini email
-create table plans (
+create table if not exists plans (
   id uuid default gen_random_uuid() primary key,
+  session_date date not null,
   email_date text not null,
   subject text not null,
   body text not null,
@@ -13,8 +14,9 @@ create table plans (
 );
 
 -- Trades table: stores trade log entries
-create table trades (
+create table if not exists trades (
   id uuid default gen_random_uuid() primary key,
+  session_date date not null,
   symbol text not null default 'ES',
   direction text not null check (direction in ('long', 'short')),
   contracts integer not null default 1,
@@ -28,8 +30,7 @@ create table trades (
   created_at timestamptz default now()
 );
 
--- Index for fast latest-plan lookup
-create index idx_plans_created_at on plans (created_at desc);
-
--- Index for trade history queries
-create index idx_trades_created_at on trades (created_at desc);
+create index if not exists idx_plans_session_date on plans (session_date desc);
+create index if not exists idx_plans_created_at on plans (created_at desc);
+create index if not exists idx_trades_session_date on trades (session_date desc);
+create index if not exists idx_trades_created_at on trades (created_at desc);

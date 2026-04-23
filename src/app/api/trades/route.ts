@@ -4,15 +4,20 @@ import { createServerClient } from "@/lib/supabase";
 export async function GET(req: NextRequest) {
   try {
     const supabase = createServerClient();
-    const days = parseInt(req.nextUrl.searchParams.get("days") || "30");
-    const since = new Date();
-    since.setDate(since.getDate() - days);
+    const dateParam = req.nextUrl.searchParams.get("date");
 
-    const { data, error } = await supabase
-      .from("trades")
-      .select("*")
-      .gte("created_at", since.toISOString())
-      .order("created_at", { ascending: false });
+    let query = supabase.from("trades").select("*");
+
+    if (dateParam) {
+      query = query.eq("session_date", dateParam);
+    } else {
+      const days = parseInt(req.nextUrl.searchParams.get("days") || "30");
+      const since = new Date();
+      since.setDate(since.getDate() - days);
+      query = query.gte("created_at", since.toISOString());
+    }
+
+    const { data, error } = await query.order("created_at", { ascending: false });
 
     if (error) {
       return NextResponse.json({ error: "Failed to fetch trades" }, { status: 500 });

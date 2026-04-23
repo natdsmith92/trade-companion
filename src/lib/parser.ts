@@ -7,15 +7,56 @@ import { Level, ParsedPlan } from "./types";
  *   "Resistances are: 6700 (major), 6716 (major), ..."
  *   Ranges like "6778-82" (= 6778 to 6782) or "6820-6822"
  */
-export function parseLevels(text: string): ParsedPlan {
+export function parseLevels(text: string, subject?: string): ParsedPlan {
   const supports = extractLevels(text, "support");
   const resistances = extractLevels(text, "resistance");
   const lean = extractLean(text);
   const bullTargets = extractScenarioTargets(text, "bull");
   const bearTargets = extractScenarioTargets(text, "bear");
   const triggers = extractTriggers(text);
+  const sessionDate = extractSessionDate(subject || text);
 
-  return { supports, resistances, lean, bullTargets, bearTargets, triggers };
+  return { supports, resistances, lean, bullTargets, bearTargets, triggers, sessionDate };
+}
+
+/**
+ * Extract the session date from the email subject or body.
+ * Mancini subjects look like: "April 22 Plan", "April 23rd Plan", "4/22 Plan"
+ * The date in the subject is the day the plan APPLIES TO (the next trading day).
+ * Falls back to next trading day if no date found.
+ */
+function extractSessionDate(text: string): string {
+  const currentYear = new Date().getFullYear();
+
+  // Match "Month Day" patterns: "April 22", "April 22nd", "Apr 22"
+  const monthDayMatch = text.match(
+    /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+(\d{1,2})(?:st|nd|rd|th)?\b/i
+  );
+  if (monthDayMatch) {
+    const parsed = new Date(`${monthDayMatch[1]} ${monthDayMatch[2]}, ${currentYear}`);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toISOString().split("T")[0];
+    }
+  }
+
+  // Match "M/D" patterns: "4/22", "04/22"
+  const slashMatch = text.match(/\b(\d{1,2})\/(\d{1,2})\b/);
+  if (slashMatch) {
+    const month = parseInt(slashMatch[1]) - 1;
+    const day = parseInt(slashMatch[2]);
+    const parsed = new Date(currentYear, month, day);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toISOString().split("T")[0];
+    }
+  }
+
+  // Fallback: next trading day (skip weekends)
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  while (tomorrow.getDay() === 0 || tomorrow.getDay() === 6) {
+    tomorrow.setDate(tomorrow.getDate() + 1);
+  }
+  return tomorrow.toISOString().split("T")[0];
 }
 
 function extractLevels(text: string, type: "support" | "resistance"): Level[] {
