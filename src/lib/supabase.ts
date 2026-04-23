@@ -1,17 +1,48 @@
+import { createBrowserClient as createBrowser } from "@supabase/ssr";
+import { createServerClient as createServer } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
+import { cookies } from "next/headers";
 
-// Server-side client (uses service key for API routes)
-export function createServerClient() {
-  return createClient(
+// Browser client — used in "use client" components
+// Authenticated as the logged-in user via cookies
+export function createBrowserSupabase() {
+  return createBrowser(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 }
 
-// Client-side client (uses anon key for browser)
-export function createBrowserClient() {
+// Server client — used in API routes and server components
+// Authenticated as the logged-in user via cookies (respects RLS)
+export async function createServerSupabase() {
+  const cookieStore = await cookies();
+  return createServer(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
+          } catch {
+            // Called from Server Component — can't set cookies
+          }
+        },
+      },
+    }
+  );
+}
+
+// Admin client — bypasses RLS, used only for webhook ingestion
+// Uses the service_role key, never exposed to the browser
+export function createAdminSupabase() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    process.env.SUPABASE_SERVICE_KEY!
   );
 }

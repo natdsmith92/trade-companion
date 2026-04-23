@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@/lib/supabase";
+import { createServerSupabase } from "@/lib/supabase";
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = createServerClient();
+    const supabase = await createServerSupabase();
     const dateParam = req.nextUrl.searchParams.get("date");
 
     let query = supabase.from("trades").select("*");
@@ -33,11 +33,17 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const supabase = createServerClient();
+    const supabase = await createServerSupabase();
+
+    // Get the authenticated user's ID
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
 
     const { data, error } = await supabase
       .from("trades")
-      .insert(body)
+      .insert({ ...body, user_id: user.id })
       .select()
       .single();
 

@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { parseLevels } from "@/lib/parser";
+import { createBrowserSupabase } from "@/lib/supabase";
 import { ParsedPlan, Trade, Session } from "@/lib/types";
 import LevelLadder from "@/components/LevelLadder";
 import GamePlan from "@/components/GamePlan";
@@ -13,6 +15,9 @@ type Tab = (typeof TABS)[number];
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("Levels");
+  const [userEmail, setUserEmail] = useState<string>("");
+  const [userId, setUserId] = useState<string>("");
+  const router = useRouter();
   const [parsed, setParsed] = useState<ParsedPlan | null>(null);
   const [currentPrice, setCurrentPrice] = useState<string>("");
   const [showPaste, setShowPaste] = useState(false);
@@ -21,6 +26,24 @@ export default function Dashboard() {
   // Session management
   const [sessionDate, setSessionDate] = useState<string>("");
   const [sessions, setSessions] = useState<Session[]>([]);
+
+  // Load user info on mount
+  useEffect(() => {
+    const supabase = createBrowserSupabase();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        setUserEmail(user.email || "");
+        setUserId(user.id);
+      }
+    });
+  }, []);
+
+  async function handleSignOut() {
+    const supabase = createBrowserSupabase();
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
+  }
 
   // Load all available sessions on mount
   useEffect(() => {
@@ -80,7 +103,7 @@ export default function Dashboard() {
     setSessionDate(result.sessionDate);
     setShowPaste(false);
 
-    // Store in Supabase
+    // Store in Supabase with user_id
     fetch("/api/ingest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -88,6 +111,7 @@ export default function Dashboard() {
         date: new Date().toISOString(),
         subject: "Manual Paste",
         body: text,
+        user_id: userId,
       }),
     })
       .then((r) => r.json())
@@ -237,6 +261,20 @@ export default function Dashboard() {
           <div className="text-xs mt-0.5" style={{ color: "var(--text-3)" }}>
             Session P&L
           </div>
+        </div>
+
+        {/* User */}
+        <div className="pl-4 border-l flex items-center gap-3" style={{ borderColor: "var(--border)" }}>
+          <div className="text-xs truncate max-w-[120px]" style={{ color: "var(--text-4)" }}>
+            {userEmail}
+          </div>
+          <button
+            onClick={handleSignOut}
+            className="text-xs px-3 py-1 rounded border hover:opacity-80"
+            style={{ borderColor: "var(--border)", color: "var(--text-4)" }}
+          >
+            Sign out
+          </button>
         </div>
       </header>
 

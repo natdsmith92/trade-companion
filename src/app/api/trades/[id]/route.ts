@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@/lib/supabase";
+import { createServerSupabase } from "@/lib/supabase";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
     const body = await req.json();
-    const supabase = createServerClient();
+    const supabase = await createServerSupabase();
 
+    // RLS ensures users can only update their own trades
     const { data, error } = await supabase
       .from("trades")
       .update(body)
@@ -28,8 +29,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const supabase = createServerClient();
+    const supabase = await createServerSupabase();
 
+    // RLS ensures users can only delete their own trades
     const { error } = await supabase
       .from("trades")
       .delete()
