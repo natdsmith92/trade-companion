@@ -95,7 +95,7 @@ export default function Dashboard() {
       .then(setTrades)
       .catch(() => setTrades([]));
 
-    // Fetch Claude-generated headline for the header
+    // Fetch AI-generated headline for the header
     fetch(`/api/tldr?date=${date}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {

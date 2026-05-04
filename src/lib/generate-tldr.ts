@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { createAdminSupabase } from "./supabase-server";
 import { TldrData } from "./tldr-types";
 
@@ -102,20 +102,22 @@ export async function generateTldr(
   planId: string,
   emailBody: string
 ): Promise<TldrData | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    console.error("ANTHROPIC_API_KEY not set — skipping TL;DR generation");
+    console.error("OPENAI_API_KEY not set — skipping TL;DR generation");
     return null;
   }
 
-  const client = new Anthropic({ apiKey });
+  const client = new OpenAI({ apiKey });
 
   try {
-    const message = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 3072,
-      system: SYSTEM_PROMPT,
+    const completion = await client.chat.completions.create({
+      model: "gpt-5.5",
+      max_completion_tokens: 16000,
+      reasoning_effort: "high",
+      response_format: { type: "json_object" },
       messages: [
+        { role: "system", content: SYSTEM_PROMPT },
         {
           role: "user",
           content: `Here is today's Mancini email. Generate the TL;DR JSON:\n\n${emailBody}`,
@@ -123,24 +125,17 @@ export async function generateTldr(
       ],
     });
 
-    // Extract text from response
-    const textBlock = message.content.find((b) => b.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      console.error("No text block in Claude response");
+    const raw = completion.choices[0]?.message?.content?.trim();
+    if (!raw) {
+      console.error("No content in OpenAI response");
       return null;
-    }
-
-    // Strip markdown fences if present
-    let raw = textBlock.text.trim();
-    if (raw.startsWith("```")) {
-      raw = raw.replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
     }
 
     const tldr: TldrData = JSON.parse(raw);
 
     // Validate basic structure
     if (!tldr.stats || !tldr.sections || !Array.isArray(tldr.stats) || !Array.isArray(tldr.sections)) {
-      console.error("Invalid TL;DR structure from Claude");
+      console.error("Invalid TL;DR structure from OpenAI");
       return null;
     }
 
