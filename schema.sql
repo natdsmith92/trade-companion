@@ -8,6 +8,7 @@
 --   • migrate-session-date.sql      — session_date column on both tables
 --   • migrate-multi-tenant.sql      — user_id + RLS policies
 --   • migrate-trade-idempotency.sql — F10 idempotency_key on trades
+--   • migrate-es-price-cache.sql    — F6 persistent es-price cache
 -- TLDR JSONB column on plans is also included (was added directly via
 -- the dashboard; folded in here so a fresh deploy includes it).
 
@@ -95,3 +96,22 @@ create policy "Users can delete their own trades"
 
 -- The service role key bypasses RLS entirely, so the webhook ingest path
 -- (/api/inbound-email once Phase 4 lands, /api/ingest today) keeps working.
+
+-- ───── es_price_cache (F6) ─────
+-- Single-row cache for the live ES quote. Survives Render cold starts and
+-- shares state across instances. RLS denies public access; only the
+-- service role reads/writes it.
+create table if not exists es_price_cache (
+  id integer primary key default 1,
+  price numeric not null default 0,
+  change numeric not null default 0,
+  change_percent numeric not null default 0,
+  market_state text not null default 'CLOSED',
+  updated_at timestamptz not null default now(),
+  constraint es_price_cache_singleton check (id = 1)
+);
+
+alter table es_price_cache enable row level security;
+
+insert into es_price_cache (id) values (1)
+  on conflict (id) do nothing;

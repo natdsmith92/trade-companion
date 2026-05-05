@@ -1,8 +1,19 @@
 import YahooFinance from "yahoo-finance2";
+import { createAdminSupabase } from "@/lib/supabase-server";
 
 const yf = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
 
-interface PriceCache {
+const CACHE_TTL_MS = 60_000; // 60s — F6, eng-review locked
+
+interface CachedPrice {
+  price: number;
+  change: number;
+  change_percent: number;
+  market_state: string;
+  updated_at: string;
+}
+
+interface PriceResponse {
   price: number;
   change: number;
   changePercent: number;
@@ -11,44 +22,76 @@ interface PriceCache {
   stale?: boolean;
 }
 
-let cache: PriceCache = {
-  price: 0,
-  change: 0,
-  changePercent: 0,
-  marketState: "CLOSED",
-  timestamp: 0,
-};
-
-const CACHE_TTL = 10_000; // 10 seconds
+function shape(row: CachedPrice, stale: boolean): PriceResponse {
+  return {
+    price: Number(row.price) || 0,
+    change: Number(row.change) || 0,
+    changePercent: Number(row.change_percent) || 0,
+    marketState: row.market_state || "CLOSED",
+    timestamp: new Date(row.updated_at).getTime(),
+    ...(stale ? { stale: true } : {}),
+  };
+}
 
 export async function GET() {
-  const now = Date.now();
+  const supabase = createAdminSupabase();
 
-  // Return cached price if fresh
-  if (cache.price > 0 && now - cache.timestamp < CACHE_TTL) {
-    return Response.json(cache);
+  // Read the singleton cache row (seeded by the migration).
+  const { data: cached } = await supabase
+    .from("es_price_cache")
+    .select("price, change, change_percent, market_state, updated_at")
+    .eq("id", 1)
+    .maybeSingle();
+
+  const cachedRow = cached as CachedPrice | null;
+  const now = Date.now();
+  const cachedAge =
+    cachedRow ? now - new Date(cachedRow.updated_at).getTime() : Infinity;
+
+  // Fresh cache hit → return it.
+  if (cachedRow && cachedRow.price > 0 && cachedAge < CACHE_TTL_MS) {
+    return Response.json(shape(cachedRow, false));
   }
 
+  // Cache stale or empty → refresh from Yahoo.
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const quote: any = await yf.quote("ES=F");
-    cache = {
+    const fresh = {
+      id: 1,
       price: quote.regularMarketPrice ?? 0,
       change: quote.regularMarketChange ?? 0,
-      changePercent: quote.regularMarketChangePercent ?? 0,
-      marketState: quote.marketState ?? "CLOSED",
-      timestamp: now,
+      change_percent: quote.regularMarketChangePercent ?? 0,
+      market_state: quote.marketState ?? "CLOSED",
+      updated_at: new Date().toISOString(),
     };
-    return Response.json(cache);
+
+    // Upsert. Don't block the response on a write hiccup.
+    supabase
+      .from("es_price_cache")
+      .upsert(fresh)
+      .then(({ error }) => {
+        if (error) console.error("es_price_cache upsert error:", error);
+      });
+
+    return Response.json(shape(fresh, false));
   } catch (err) {
     console.error("Yahoo Finance fetch error:", err);
-    // Return stale cache on error
-    if (cache.price > 0) {
-      return Response.json({ ...cache, stale: true });
+    // Yahoo failed (timeout, cookie wall, rate limit). Fall back to whatever
+    // is in the cache, marked stale, so the UI keeps a recent frame.
+    if (cachedRow && cachedRow.price > 0) {
+      return Response.json(shape(cachedRow, true));
     }
     return Response.json(
-      { price: 0, change: 0, changePercent: 0, marketState: "CLOSED", timestamp: now, stale: true },
-      { status: 502 }
+      {
+        price: 0,
+        change: 0,
+        changePercent: 0,
+        marketState: "CLOSED",
+        timestamp: now,
+        stale: true,
+      },
+      { status: 502 },
     );
   }
 }
