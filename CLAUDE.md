@@ -124,3 +124,20 @@ OPENAI_API_KEY=sk-xxx                       # required by /api/tldr (and /api/pa
 - Supabase clients live in two files:
   - `src/lib/supabase-browser.ts` — browser client for client components
   - `src/lib/supabase-server.ts` — exports `createServerSupabase` (per-request, RLS-aware) and `createAdminSupabase` (service-key client, webhook-only)
+
+## Documentation Map
+
+This file is the entry point. Deeper detail lives in:
+
+| Doc | When to read it |
+|-----|-----------------|
+| [README.md](README.md) | Public-facing project pitch + quick start |
+| [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) | First-time setup, clone → running dev server |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, hook layer, error boundary topology, request lifecycle |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Day-2 contributor conventions: adding routes, hooks, components, migrations |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every env var, script, migration, third-party config knob |
+| [docs/TESTING.md](docs/TESTING.md) | Current state (no tests) and the planned F3 stack |
+| [docs/API.md](docs/API.md) | All HTTP API routes with request/response shapes and curl examples |
+| [docs/PRODUCT.md](docs/PRODUCT.md) | Product roadmap, phase plan |
+| [docs/BUSINESS.md](docs/BUSINESS.md) | Business strategy, market thesis, partnership pathway |
+| [CHANGELOG.md](CHANGELOG.md) | Versioned release notes |

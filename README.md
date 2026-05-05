@@ -61,11 +61,15 @@ For deeper detail, see the docs:
 | Doc                                       | What's inside                                                  |
 |-------------------------------------------|----------------------------------------------------------------|
 | [CLAUDE.md](CLAUDE.md)                    | Project entry point — tech stack, structure, conventions       |
+| [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) | Step-by-step setup from clone to first plan paste     |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture, data flow, key abstractions             |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Local setup, build commands, code style                        |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Env vars, scripts, migrations, third-party config         |
+| [docs/TESTING.md](docs/TESTING.md)        | Current test state + planned F3 stack (Vitest + LLM evals)     |
 | [docs/API.md](docs/API.md)                | API routes (`/api/ingest`, `/api/trades`, etc.) reference      |
 | [docs/PRODUCT.md](docs/PRODUCT.md)        | Product roadmap and phase plan                                 |
 | [docs/BUSINESS.md](docs/BUSINESS.md)      | Business strategy and SaaS launch direction                    |
+| [CHANGELOG.md](CHANGELOG.md)              | Versioned release notes                                        |
 
 ## Status & Disclaimer
 
