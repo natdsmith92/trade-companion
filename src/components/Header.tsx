@@ -2,13 +2,14 @@
 
 import { PnLBreakdown } from "@/lib/pnl";
 import { PriceSource } from "@/hooks/useManualPrice";
+import { NavDirection } from "@/hooks/useSessions";
 
 interface HeaderProps {
   // Date navigation
   planLabel: string;
   canGoNewer: boolean;
   canGoOlder: boolean;
-  onNavigate: (direction: -1 | 1) => void;
+  onNavigate: (direction: NavDirection) => void;
 
   // Thesis
   headline: string;
@@ -64,7 +65,7 @@ export default function Header(props: HeaderProps) {
       <div className="hdr-plan-date">
         <button
           className="hdr-plan-nav"
-          onClick={() => onNavigate(1)}
+          onClick={() => onNavigate("older")}
           disabled={!canGoOlder}
           title="Older session"
         >
@@ -76,7 +77,7 @@ export default function Header(props: HeaderProps) {
         </div>
         <button
           className="hdr-plan-nav"
-          onClick={() => onNavigate(-1)}
+          onClick={() => onNavigate("newer")}
           disabled={!canGoNewer}
           title="Newer session"
         >
