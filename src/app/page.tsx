@@ -12,6 +12,7 @@ import {
   EditTradeModal,
 } from "@/components/TradeLog";
 import Header from "@/components/Header";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import { useAuth } from "@/hooks/useAuth";
 import { useSessions } from "@/hooks/useSessions";
 import { useParsedPlan } from "@/hooks/useParsedPlan";
@@ -98,13 +99,15 @@ export default function Dashboard() {
       />
 
       <div className="main">
-        <LevelLadder
-          supports={parsed?.supports || []}
-          resistances={parsed?.resistances || []}
-          currentPrice={price.currentPrice}
-          priceSource={price.priceSource}
-          onPaste={() => setShowPaste(true)}
-        />
+        <ErrorBoundary label="Level Ladder">
+          <LevelLadder
+            supports={parsed?.supports || []}
+            resistances={parsed?.resistances || []}
+            currentPrice={price.currentPrice}
+            priceSource={price.priceSource}
+            onPaste={() => setShowPaste(true)}
+          />
+        </ErrorBoundary>
 
         <section className="rp">
           <div className="tabs">
@@ -125,19 +128,27 @@ export default function Dashboard() {
 
           <div className="tc">
             {activeTab === "plan" && (
-              <GamePlan
-                bullTargets={parsed?.bullTargets || []}
-                bearTargets={parsed?.bearTargets || []}
-                triggers={parsed?.triggers || []}
-                supports={parsed?.supports || []}
-                currentPrice={price.currentPrice}
-                sessionDate={sessionDate}
-              />
+              <ErrorBoundary label="Game Plan">
+                <GamePlan
+                  bullTargets={parsed?.bullTargets || []}
+                  bearTargets={parsed?.bearTargets || []}
+                  triggers={parsed?.triggers || []}
+                  supports={parsed?.supports || []}
+                  currentPrice={price.currentPrice}
+                  sessionDate={sessionDate}
+                />
+              </ErrorBoundary>
             )}
             {activeTab === "trades" && (
-              <TradeStats trades={trades} currentPrice={price.currentPrice} />
+              <ErrorBoundary label="Trade Stats">
+                <TradeStats trades={trades} currentPrice={price.currentPrice} />
+              </ErrorBoundary>
             )}
-            {activeTab === "tldr" && <TldrTab sessionDate={sessionDate} />}
+            {activeTab === "tldr" && (
+              <ErrorBoundary label="TL;DR">
+                <TldrTab sessionDate={sessionDate} />
+              </ErrorBoundary>
+            )}
           </div>
         </section>
       </div>

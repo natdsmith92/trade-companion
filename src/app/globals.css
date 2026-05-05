@@ -1204,3 +1204,51 @@ input::placeholder {
   font-weight: 500;
 }
 
+/* Error boundary fallbacks (F7) */
+.error-boundary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 24px;
+  min-height: 200px;
+  text-align: center;
+  color: var(--ink-1, #e0e0e0);
+}
+.error-boundary-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--bear, #ef4444);
+}
+.error-boundary-msg {
+  font-size: 13px;
+  color: var(--ink-2, #999);
+  font-family: 'JetBrains Mono', monospace;
+  max-width: 480px;
+  word-break: break-word;
+}
+
+.error-route {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--bg-1, #0a0a0a);
+  padding: 24px;
+}
+.error-route-card {
+  max-width: 480px;
+  text-align: center;
+  color: var(--ink-1, #e0e0e0);
+}
+.error-route-card h2 {
+  margin-top: 0;
+  color: var(--bear, #ef4444);
+}
+.error-route-digest {
+  color: var(--ink-3, #666);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
