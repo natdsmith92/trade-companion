@@ -26,6 +26,7 @@ export interface Trade {
   point_value: number;
   notes: string | null;
   pnl: number | null;
+  idempotency_key?: string | null;
   created_at: string;
 }
 

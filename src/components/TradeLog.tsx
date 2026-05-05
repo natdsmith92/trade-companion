@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Trade } from "@/lib/types";
 import { calculatePnL } from "@/lib/parser";
 
@@ -248,12 +248,25 @@ export function NewTradeModal({ sessionDate, onClose, onCreated }: NewTradeProps
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(false);
 
+  // F10: stable key generated once per modal open so a fast double-click,
+  // a network retry, or a click that fires before saving=true settles
+  // can't produce two rows. Server dedupes on (user_id, idempotency_key).
+  const idempotencyKeyRef = useRef<string>("");
+  if (!idempotencyKeyRef.current) {
+    idempotencyKeyRef.current = crypto.randomUUID();
+  }
+  // Belt-and-braces: also block a second handleSave call before React
+  // re-renders the disabled button.
+  const inFlightRef = useRef(false);
+
   async function handleSave() {
+    if (inFlightRef.current) return;
     const e = parseFloat(entry);
     if (!e) {
       setErr(true);
       return;
     }
+    inFlightRef.current = true;
     setSaving(true);
     const pointValue = SYMBOLS.find((s) => s.name === symbol)?.pointValue || 50;
     const e75 = exit75 ? parseFloat(exit75) : null;
@@ -272,6 +285,7 @@ export function NewTradeModal({ sessionDate, onClose, onCreated }: NewTradeProps
         e75 !== null || er !== null
           ? calculatePnL(direction, e, e75, er, parseInt(contracts) || 1, pointValue)
           : null,
+      idempotency_key: idempotencyKeyRef.current,
     };
 
     try {
@@ -289,6 +303,7 @@ export function NewTradeModal({ sessionDate, onClose, onCreated }: NewTradeProps
       // silent
     } finally {
       setSaving(false);
+      inFlightRef.current = false;
     }
   }
 
