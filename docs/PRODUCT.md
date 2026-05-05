@@ -90,17 +90,25 @@
 - [x] Middleware route protection
 - [x] Sign out functionality
 
-### Phase 4 — Email Pipeline Automation
-- [ ] Zapier integration fully wired (Gmail → webhook)
-- [ ] User-to-webhook mapping (how Zapier knows which user_id to assign)
+### Phase 4 — Inbound Email Pipeline (replaces Zapier plan)
+- [ ] Resend account + DNS setup on `inbound.tradeladder.io` (MX, SPF, DKIM)
+- [ ] Per-user inbound address: `u-{user_id_short}@inbound.tradeladder.io`
+- [ ] User configures email-forwarding rule in their personal mailbox (from Mancini → forward to per-user address)
+- [ ] Resend webhook → `/api/inbound-email` with HMAC signature validation
 - [ ] Auto-load: user opens app, today's plan is already there
-- [ ] "Load from Zapier" button as alternative to paste
+- [ ] Manual paste path (existing) preserved as fallback
+- [ ] Settings UI shows the user their inbound address (copy-to-clipboard)
+- [ ] **Why not Zapier**: third-party processor of Mancini's content = IP risk; rejected during CEO review
 
-### Phase 5 — Claude API Parsing
-- [ ] Replace regex parser with Claude API call
-- [ ] More robust handling of email format variations
+### Phase 5 — OpenAI gpt-5.5 Parsing (replaces regex parser)
+- [ ] Replace regex parser with OpenAI gpt-5.5 + structured outputs (`response_format: json_schema`, `strict: true`)
+- [ ] Zod validates the response shape post-parse
+- [ ] Regex parser kept as catch-block fallback at the route level (not inside the LLM parser)
+- [ ] More robust handling of email format variations (holiday short emails, multi-day plans, format drift)
 - [ ] Extract scenario narratives, not just price targets
-- [ ] Confidence scoring on parsed levels
+- [ ] Confidence scoring on parsed levels (visible in UI via E5 confidence flags)
+- [ ] Cache by `(email_hash, parser_version)` to avoid re-parsing
+- [ ] **Eval discipline**: human-labeled ground-truth set in `tests/parser-eval/`; CI runs on every parser-prompt change
 
 ### Phase 6 — Live Price Feed
 - [ ] Databento integration for real-time ES price

@@ -15,39 +15,47 @@ The long-term vision is to productize this as a SaaS for Mancini's subscriber ba
 | Framework | Next.js 15 (App Router, TypeScript) |
 | Styling | Tailwind CSS 4 |
 | Database | Supabase (PostgreSQL) |
-| Auth | Supabase Auth (email/password) |
+| Auth | Supabase Auth (email/password + Google OAuth) |
+| LLM | OpenAI gpt-5.5 (TLDR generation today; level parser planned in Phase 5) |
 | Deployment | Render |
 | Domain | tradeladder.io |
-| Email Pipeline | Zapier (Gmail → webhook) |
+| Email Pipeline | Resend inbound parsing (per-user forwarding addresses on `inbound.tradeladder.io`) — replaces earlier Zapier plan |
+| Live Price | yahoo-finance2 (free, with staleness fallback) — Databento upgrade planned post-SaaS-launch |
 
 ## Project Structure
 
 ```
 src/
 ├── app/
-│   ├── page.tsx                    # Main dashboard (3 tabs, date navigator, header)
+│   ├── page.tsx                    # Main dashboard (3 tabs: plan, trades, tldr; date navigator, header)
 │   ├── layout.tsx                  # Root layout with fonts
 │   ├── globals.css                 # Dark trading theme CSS variables
-│   ├── login/page.tsx              # Login page
-│   ├── signup/page.tsx             # Signup page
-│   ├── auth/callback/route.ts      # Email confirmation handler
+│   ├── login/page.tsx              # Login page (email/password + Google OAuth)
+│   ├── signup/page.tsx             # Signup page (email/password + Google OAuth)
+│   ├── auth/callback/route.ts      # Email confirmation + OAuth callback handler
 │   └── api/
-│       ├── ingest/route.ts         # POST - Zapier webhook (admin key, needs user_id)
+│       ├── ingest/route.ts         # POST - manual paste / Resend webhook ingest (auth via per-user address)
 │       ├── latest-plan/route.ts    # GET - fetch plan by session_date
 │       ├── sessions/route.ts       # GET - list all session dates
 │       ├── trades/route.ts         # GET/POST - trade log entries
 │       ├── trades/[id]/route.ts    # PATCH/DELETE - individual trades
+│       ├── tldr/route.ts           # GET - OpenAI gpt-5.5 generates session TL;DR from plan body
+│       ├── es-price/route.ts       # GET - live ES futures quote via yahoo-finance2 (cached)
 │       └── health/route.ts         # GET - health check
 ├── components/
 │   ├── LevelLadder.tsx             # Vertical price ladder with S/R levels
 │   ├── GamePlan.tsx                # Bull/bear paths + trigger cards
 │   ├── TradeLog.tsx                # Trade entry/exit + P&L calculator
+│   ├── TldrTab.tsx                 # AI-generated session summary (uses /api/tldr)
 │   └── PasteModal.tsx              # Paste email text modal
 ├── lib/
-│   ├── supabase.ts                 # Three Supabase clients (browser, server, admin)
-│   ├── parser.ts                   # Mancini email parser + P&L calculator
+│   ├── supabase-browser.ts         # Browser-side Supabase client (client components)
+│   ├── supabase-server.ts          # Server-side Supabase clients (createServerSupabase + createAdminSupabase)
+│   ├── parser.ts                   # Mancini email parser (regex-based today; Phase 5 replaces with OpenAI)
+│   ├── generate-tldr.ts            # OpenAI gpt-5.5 system prompt + TldrData schema (~95-line prompt at lines 5-99)
+│   ├── useESPrice.ts               # React hook polling /api/es-price for live quote
 │   └── types.ts                    # TypeScript interfaces
-└── middleware.ts                   # Auth protection + session refresh
+└── middleware.ts                   # Auth protection + session refresh + public-path allowlist
 ```
 
 ## Database Schema
@@ -61,6 +69,7 @@ Two tables, both with Row Level Security enabled:
 - `email_date` (text) — when the email was received
 - `subject` (text)
 - `body` (text) — raw email content
+- `tldr` (jsonb, nullable) — OpenAI gpt-5.5 generated TLDR (TldrData shape; written by /api/tldr, read by TldrTab)
 - `created_at` (timestamptz)
 
 **trades** — Trade log entries
@@ -85,6 +94,15 @@ Two tables, both with Row Level Security enabled:
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_xxx
 SUPABASE_SERVICE_KEY=sb_secret_xxx
+OPENAI_API_KEY=sk-xxx                       # required by /api/tldr (and /api/parse-plan in Phase 5)
+
+# Phase 4 (inbound email pipeline) — to add when Phase 4 lands:
+# RESEND_API_KEY=re_xxx                      # for outbound transactional + inbound webhook auth
+# RESEND_WEBHOOK_SECRET=whsec_xxx            # signature validation on inbound webhook
+
+# F9 (admin gate) — to add when /admin/pitch lands:
+# ADMIN_USER_IDS=uuid1,uuid2                 # comma-separated admin user UUIDs
+# ADMIN_PITCH_TOKEN_SECRET=...               # HMAC secret for tokenized share URLs (F12)
 ```
 
 ## Key Design Principles
@@ -103,4 +121,6 @@ SUPABASE_SERVICE_KEY=sb_secret_xxx
 - Flat structure, no unnecessary abstraction
 - Plain naming: TradeLog, LevelLadder, GamePlan
 - All API routes use try/catch with console.error logging
-- Supabase clients: browser (client components), server (API routes with auth), admin (webhook only)
+- Supabase clients live in two files:
+  - `src/lib/supabase-browser.ts` — browser client for client components
+  - `src/lib/supabase-server.ts` — exports `createServerSupabase` (per-request, RLS-aware) and `createAdminSupabase` (service-key client, webhook-only)
