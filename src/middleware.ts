@@ -27,8 +27,11 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Public routes that don't require auth
-  const publicPaths = ["/login", "/signup", "/auth/callback", "/api/ingest", "/api/health"];
+  // Public routes that don't require auth.
+  // /api/ingest is now authenticated (F2) — it derives user_id from session.
+  // /api/inbound-email (Phase 4) will be added here once it ships, with its
+  // own webhook-signature validation in place of session auth.
+  const publicPaths = ["/login", "/signup", "/auth/callback", "/api/health"];
   const isPublic = publicPaths.some((p) => request.nextUrl.pathname.startsWith(p));
 
   // If not logged in and trying to access protected route, redirect to login

@@ -31,7 +31,7 @@ const TAB_LABELS: Record<Tab, string> = {
 };
 
 export default function Dashboard() {
-  const { userEmail, userId, signOut } = useAuth();
+  const { userEmail, signOut } = useAuth();
 
   const {
     sessions,
@@ -45,7 +45,6 @@ export default function Dashboard() {
 
   const { parsed, headline, ingestPaste } = useParsedPlan({
     sessionDate,
-    userId,
     onSessionChanged: setSessionDate,
     onAfterIngest: refreshSessions,
   });

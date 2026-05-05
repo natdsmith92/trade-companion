@@ -12,14 +12,12 @@ export interface ParsedPlanState {
 
 interface UseParsedPlanArgs {
   sessionDate: string;
-  userId: string;
   onSessionChanged: (newDate: string) => void;
   onAfterIngest: () => Promise<void> | void;
 }
 
 export function useParsedPlan({
   sessionDate,
-  userId,
   onSessionChanged,
   onAfterIngest,
 }: UseParsedPlanArgs): ParsedPlanState {
@@ -54,6 +52,7 @@ export function useParsedPlan({
     setParsed(result);
     onSessionChanged(result.sessionDate);
 
+    // user_id derived server-side from the session cookie (F2).
     fetch("/api/ingest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -61,7 +60,6 @@ export function useParsedPlan({
         date: new Date().toISOString(),
         subject: "Manual Paste",
         body: text,
-        user_id: userId,
       }),
     })
       .then((r) => r.json())
