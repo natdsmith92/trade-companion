@@ -3,14 +3,17 @@
 -- Run this on a fresh Supabase project. For an existing project,
 -- run the migrate-*.sql files in chronological order instead.
 -- ══════════════════════════════════════════════
--- Tables: plans, trades
+-- Tables: plans, trades, es_price_cache, monitoring_alerts
 -- Migrations folded in here:
 --   • migrate-session-date.sql      — session_date column on both tables
 --   • migrate-multi-tenant.sql      — user_id + RLS policies
 --   • migrate-trade-idempotency.sql — F10 idempotency_key on trades
 --   • migrate-es-price-cache.sql    — F6 persistent es-price cache
+--   • migrate-monitoring.sql        — F8b monitoring_alerts + pg_cron
 -- TLDR JSONB column on plans is also included (was added directly via
 -- the dashboard; folded in here so a fresh deploy includes it).
+-- PREREQUISITE for F8b: enable pg_cron extension in Supabase
+-- (Database → Extensions → pg_cron → Enable).
 
 -- ───── plans ─────
 -- One row per daily Mancini email per user.
@@ -115,3 +118,51 @@ alter table es_price_cache enable row level security;
 
 insert into es_price_cache (id) values (1)
   on conflict (id) do nothing;
+
+-- ───── monitoring_alerts (F8b) ─────
+-- Append-only operational alerts log. Today's only writer is the pg_cron
+-- daily parse-success check. Service-role only via RLS.
+create table if not exists monitoring_alerts (
+  id uuid default gen_random_uuid() primary key,
+  kind text not null,
+  detail text,
+  severity text not null default 'medium' check (severity in ('low', 'medium', 'high', 'critical')),
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_monitoring_alerts_created_at on monitoring_alerts (created_at desc);
+create index if not exists idx_monitoring_alerts_kind on monitoring_alerts (kind);
+
+alter table monitoring_alerts enable row level security;
+
+-- Daily parse-success check (F8b). Requires pg_cron extension enabled
+-- in the Supabase dashboard before this runs.
+create or replace function check_daily_parse_success()
+returns void
+language plpgsql
+security definer
+as $$
+declare
+  today_date date := current_date;
+  plan_count integer;
+begin
+  select count(*) into plan_count
+  from plans
+  where session_date = today_date;
+
+  if plan_count = 0 then
+    insert into monitoring_alerts (kind, detail, severity)
+    values (
+      'parse_missing',
+      'No plan ingested for ' || today_date::text || ' by 14:00 UTC',
+      'high'
+    );
+  end if;
+end;
+$$;
+
+select cron.schedule(
+  'daily-parse-check',
+  '0 14 * * 1-5',
+  $$ select check_daily_parse_success(); $$
+);
