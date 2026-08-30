@@ -5,7 +5,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "node scripts/test-lib.mjs",
+    "eval": "node scripts/eval-parser.mjs",
+    "eval:held-out": "node scripts/eval-parser.mjs --held-out"
   },
   "dependencies": {
     "@supabase/ssr": "^0.6.1",
