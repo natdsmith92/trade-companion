@@ -117,6 +117,9 @@ export async function GET(req: NextRequest) {
     const sender = verifySender({
       envelopeSender: email.envelope_sender,
       fromEmail: email.from_email,
+      // Required for forwarded mail: the newsletter's address survives only
+      // inside the body's forwarded-header block, never in the headers.
+      body: email.body,
       allowedForwarder: route?.allowed_forwarder ?? null,
       allowedFrom: route?.allowed_from ?? null,
     });

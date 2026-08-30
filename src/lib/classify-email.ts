@@ -52,6 +52,31 @@ const PLAN_MARKERS = [
   "premarket", "pre-market", "morning note",
 ];
 
+// Calibrated against 25 real subjects pulled from Postmark. Every plan email
+// ends with a session date, essentially always followed by "Plan":
+//
+//   "Are Bulls Running Out Of Steam In SPX? July 14 Plan"
+//   "Can Bulls Keep The Push Going Into September? August 31st Plan"
+//   "[RE-SEND] Nvidia Earnings Incoming. Will It Move SPX? Aug 27 Plan"
+//   "Will Todays Dip Get Bought Next Week In SPX? July 3rd/6th Plan"
+//   "Bulls Bought The FOMC Dip In SPX. Will The Rally Continue? June 19/22"
+//
+// Matching this turns an LLM call into a string test on the morning path,
+// where latency is worth the most. It stays safe because a recap or update
+// subject trips RECAP_MARKERS/UPDATE_MARKERS, and mixed signals defer to the
+// tie-break rather than guessing.
+//
+// Note the trailing "Plan" is OPTIONAL (see the June 19/22 case) and the day
+// may be a pair ("3rd/6th", "19/22") when one plan covers two sessions.
+const MONTHS =
+  "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|" +
+  "aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
+const DAY = "\\d{1,2}(?:st|nd|rd|th)?";
+const DATED_PLAN = new RegExp(
+  `\\b(?:${MONTHS})\\.?\\s+${DAY}(?:\\s*/\\s*${DAY})?\\s*(?:plan)?\\s*\\.?\\s*$`,
+  "i",
+);
+
 const SYSTEM_PROMPT = `You classify emails from Adam Mancini's ES futures newsletter.
 
 Return ONLY JSON: {"classification": "plan" | "not_plan", "confident": true|false, "reason": "short explanation"}
@@ -89,9 +114,17 @@ export function heuristicClassify(subject: string): Classification | null {
   const s = (subject ?? "").toLowerCase();
   if (!s) return null;
 
-  const looksRecap = RECAP_MARKERS.some((m) => s.includes(m));
-  const looksUpdate = UPDATE_MARKERS.some((m) => s.includes(m));
-  const looksPlan = PLAN_MARKERS.some((m) => s.includes(m));
+  // Strip a forwarding prefix so "Fwd: ... July 14 Plan" still ends in the
+  // date pattern, and drop a "[RE-SEND]"-style tag from the front.
+  const cleaned = s
+    .replace(/^\s*(?:fwd|fw|re)\s*:\s*/i, "")
+    .replace(/^\s*\[[^\]]*\]\s*/, "")
+    .trim();
+
+  const looksRecap = RECAP_MARKERS.some((m) => cleaned.includes(m));
+  const looksUpdate = UPDATE_MARKERS.some((m) => cleaned.includes(m));
+  const looksPlan =
+    PLAN_MARKERS.some((m) => cleaned.includes(m)) || DATED_PLAN.test(cleaned);
 
   // Mixed signals are exactly the case the tie-break exists for.
   if (looksPlan && (looksRecap || looksUpdate)) return null;

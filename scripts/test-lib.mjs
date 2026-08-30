@@ -100,45 +100,78 @@ const classify = await loadLib("classify-email");
 }
 
 // ───────────────────────── verifySender ─────────────────────────
+// Shapes below are taken from REAL payloads in Postmark, not invented. The
+// live mail is a manual Gmail forward: outer From is the forwarder, DKIM is
+// d=gmail.com, and the newsletter address exists only inside the body.
 {
-  const route = { allowedForwarder: "dad@gmail.com", allowedFrom: "adam@mancini.substack.com" };
-  const dkim = [{ Name: "DKIM-Signature", Value: "v=1; a=rsa-sha256; d=mancini.substack.com; s=x" }];
+  const route = {
+    allowedForwarder: "theoverstockshop@gmail.com",
+    allowedFrom: "tradecompanion@substack.com",
+  };
+  const gmailDkim = [{ Name: "DKIM-Signature", Value: "v=1; a=rsa-sha256; c=relaxed/relaxed; d=gmail.com; s=20251104" }];
+  const fwdBody = [
+    "---------- Forwarded message ---------",
+    "From: Adam Mancini from Adam Mancini's S&P 500 (SPX/ES Futures) Trade",
+    "Companion <tradecompanion@substack.com>",
+    "Date: Sun, Aug 30, 2026 at 8:57 AM",
+    "Subject: Can Bulls Keep The Push Going Into September? August 31st Plan",
+    "To: <theoverstockshop@gmail.com>",
+    "",
+    "Supports are: 7373, 7382 (major).",
+  ].join("\n");
+
+  // The display name wraps across a line break in real Gmail forwards, which
+  // is exactly what broke a naive single-line From regex.
+  eq("extracts original sender across a wrapped display name",
+    sender.forwardedOriginalSender(fwdBody), "tradecompanion@substack.com");
+  check("non-forward body yields no inner sender",
+    sender.forwardedOriginalSender("Supports are: 7373.") === null);
 
   let r = sender.verifySender({
-    ...route, envelopeSender: "dad@gmail.com", fromEmail: "adam@mancini.substack.com",
+    ...route, envelopeSender: "theoverstockshop@gmail.com",
+    fromEmail: "theoverstockshop@gmail.com", headers: gmailDkim, body: fwdBody,
   });
-  check("expected forwarder + matching From accepts", r.verdict === "accept", r.reason);
+  check("real forwarded newsletter is accepted", r.verdict === "accept", r.reason);
 
-  // The whole point: a forged From from a stranger must not reach the parser.
+  // Dad forwarding something that is NOT the newsletter must not publish.
+  const otherBody = fwdBody.replace("tradecompanion@substack.com", "spam@elsewhere.com");
   r = sender.verifySender({
-    ...route, envelopeSender: "attacker@evil.com", fromEmail: "attacker@evil.com",
+    ...route, envelopeSender: "theoverstockshop@gmail.com",
+    fromEmail: "theoverstockshop@gmail.com", headers: gmailDkim, body: otherBody,
   });
-  check("stranger is quarantined", r.verdict === "quarantine");
+  check("forward of a different sender is quarantined", r.verdict === "quarantine", r.reason);
 
-  // From spoofed to look right, but forwarded by nobody we trust and no DKIM.
+  // Someone else forwarding the real newsletter must not publish either.
   r = sender.verifySender({
-    ...route, envelopeSender: "attacker@evil.com", fromEmail: "adam@mancini.substack.com",
+    ...route, envelopeSender: "stranger@evil.com",
+    fromEmail: "stranger@evil.com", headers: gmailDkim, body: fwdBody,
   });
-  check("spoofed From without trusted forwarder or DKIM is quarantined",
+  check("forward from an unexpected mailbox is quarantined", r.verdict === "quarantine", r.reason);
+
+  // Outer hop unproven: right mailbox claimed, but nothing signed for it.
+  r = sender.verifySender({
+    ...route, envelopeSender: "theoverstockshop@gmail.com",
+    fromEmail: "theoverstockshop@gmail.com", headers: [], body: fwdBody,
+  });
+  check("forward with no DKIM over the forwarder domain is quarantined",
     r.verdict === "quarantine", r.reason);
 
-  // Surviving DKIM over the newsletter domain vouches for an odd forwarder.
-  r = sender.verifySender({
-    ...route, envelopeSender: "relay@somewhere.net",
-    fromEmail: "adam@mancini.substack.com", headers: dkim,
-  });
-  check("surviving DKIM vouches for an unexpected forwarder",
-    r.verdict === "accept" && r.signals.dkimPresent, r.reason);
-
-  eq("dkimDomain extracts d=", sender.dkimDomain(dkim), "mancini.substack.com");
+  eq("dkimDomain extracts d=", sender.dkimDomain(gmailDkim), "gmail.com");
   check("dkimDomain tolerates absent header", sender.dkimDomain([]) === null);
 
-  // Name <addr> form must normalize, or every real email quarantines.
+  // Direct (non-forward) path, for a future Gmail filter or MX routing.
+  const substackDkim = [{ Name: "DKIM-Signature", Value: "v=1; d=substack.com; s=x" }];
   r = sender.verifySender({
-    ...route, envelopeSender: "Dad <dad@gmail.com>",
-    fromEmail: "Adam Mancini <adam@mancini.substack.com>",
+    ...route, envelopeSender: "bounce@substack.com",
+    fromEmail: "tradecompanion@substack.com", headers: substackDkim, body: "Supports are: 7373.",
   });
-  check("display-name address form is normalized", r.verdict === "accept", r.reason);
+  check("direct newsletter with its own DKIM is accepted", r.verdict === "accept", r.reason);
+
+  r = sender.verifySender({
+    ...route, envelopeSender: "attacker@evil.com",
+    fromEmail: "attacker@evil.com", headers: [], body: "Supports are: 7373.",
+  });
+  check("direct mail from a stranger is quarantined", r.verdict === "quarantine");
 }
 
 // ───────────────────────── classification heuristics ─────────────────────────
@@ -151,6 +184,21 @@ const classify = await loadLib("classify-email");
   check("mixed signals defer to tie-break", h("Trade Plan Recap") === null);
   check("unknown subject defers to tie-break", h("Hello") === null);
   check("empty subject defers to tie-break", h("") === null);
+
+  // Real subjects pulled from Postmark. Every one must classify without an
+  // LLM call — this runs on the morning path where latency costs the most.
+  for (const real of [
+    "Fwd: Are Bulls Running Out Of Steam In SPX? July 14 Plan",
+    "Fwd: Can Bulls Keep The Push Going Into September? August 31st Plan",
+    "Fwd: [RE-SEND] Nvidia Earnings Incoming. Will It Move SPX? Aug 27 Plan",
+    "Fwd: Will Todays Dip Get Bought Next Week In SPX? July 3rd/6th Plan",
+    "Fwd: Bulls Bought The FOMC Dip In SPX. Will The Rally Continue? June 19/22",
+    "Fwd: Is The Bottom In For SPX? August 28th Plan.",
+  ]) {
+    check(`real subject classifies as plan: ${real.slice(5, 40)}...`, h(real) === "plan");
+  }
+  // A recap that also carries a date must NOT short-circuit to plan.
+  check("dated recap still defers", h("Fwd: Weekly Recap. July 14 Plan") === null);
 }
 
 // ───────────────────────── report ─────────────────────────

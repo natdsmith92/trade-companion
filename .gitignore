@@ -10,3 +10,7 @@ tsconfig.tsbuildinfo
 
 # Transpiled TS cache used by scripts/_load-ts.mjs
 node_modules/.cache/
+
+# Raw Postmark payloads pulled for the eval corpus. Real newsletter
+# content and headers; kept out of git.
+evals/corpus/
