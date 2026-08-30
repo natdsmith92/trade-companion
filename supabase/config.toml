@@ -1,0 +1,6 @@
+# Supabase CLI project config.
+#
+# Only project_id is set. The local dev stack (supabase start) needs Docker,
+# which is not installed here and is not required: every command in
+# docs/INBOUND-SETUP.md targets the REMOTE database directly via --db-url.
+project_id = "khixceiqgwyscozxfaqs"

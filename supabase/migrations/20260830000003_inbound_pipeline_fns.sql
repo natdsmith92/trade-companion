@@ -41,22 +41,29 @@ returns table (
 language plpgsql
 as $$
 begin
+  -- Distinct aliases (cand / tgt) on purpose. Using `e` for both the CTE
+  -- source and the UPDATE target is legal but reads as if one shadows the
+  -- other, and this is the function everything else depends on being correct.
   return query
-  with claimed as (
-    select e.id
-    from emails e
-    where e.status = 'pending'
-      and e.attempts < max_attempts
-    order by e.received_at asc
+  with candidate as (
+    select cand.id
+    from emails cand
+    where cand.status = 'pending'
+      and cand.attempts < claim_pending_email.max_attempts
+    order by cand.received_at asc
     for update skip locked
     limit 1
   )
-  update emails e
-     set attempts = e.attempts + 1,
+  update emails tgt
+     set attempts = tgt.attempts + 1,
          last_attempt_at = now()
-    from claimed c
-   where e.id = c.id
-  returning e.id, e.user_id, e.subject, e.body, e.from_email, e.envelope_sender, e.attempts;
+    from candidate c
+   where tgt.id = c.id
+  -- attempts is returned POST-increment, so the caller sees the attempt it is
+  -- about to make counted. The sweep compares it against MAX_ATTEMPTS to
+  -- decide whether this is the last try before giving up.
+  returning tgt.id, tgt.user_id, tgt.subject, tgt.body,
+            tgt.from_email, tgt.envelope_sender, tgt.attempts;
 end;
 $$;
 

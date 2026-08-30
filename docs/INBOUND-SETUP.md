@@ -10,11 +10,37 @@ Work top to bottom. Each step says how to tell it worked.
 
 ## 0. Apply the migrations
 
-Supabase dashboard → SQL Editor. Run in this order:
+The three new migrations live in `supabase/migrations/` and are applied by the
+Supabase CLI, which is pinned as a devDependency. You do **not** need Docker
+(that is only for the local stack) and you do **not** need to log in.
 
-1. `migrate-plans-unique.sql`
-2. `migrate-inbound-pipeline.sql`
-3. `migrate-inbound-pipeline-fns.sql`
+### Get the connection string
+
+Supabase dashboard → Project Settings → Database → **Connection string** →
+URI. Use the **session pooler** or direct connection. It contains your database
+password, so keep it in your shell only — never in a file in this repo.
+
+```bash
+export SUPABASE_DB_URL='postgresql://postgres:...@...supabase.com:5432/postgres'
+```
+
+If the password contains special characters they must be percent-encoded; the
+dashboard gives you a correctly-encoded string already.
+
+### Preview, then apply
+
+```bash
+npm run db:check
+```
+
+That prints exactly what would run and changes nothing. When it looks right:
+
+```bash
+npm run db:push
+```
+
+Three migrations apply in order: the unique index, then the pipeline tables,
+then the functions and cron schedules (which depend on those tables existing).
 
 ### Step 1 is not routine — read this
 
@@ -25,7 +51,7 @@ requires one for `ON CONFLICT`. So exactly one of these is true right now:
 - the index was added by hand in the dashboard and is simply undocumented, or
 - **every ingest upsert has been failing** with `42P10`.
 
-Find out before assuming. In the SQL editor:
+Find out. In the dashboard SQL editor:
 
 ```sql
 select indexname from pg_indexes
@@ -34,16 +60,18 @@ select indexname from pg_indexes
 select count(*), max(created_at) from plans;
 ```
 
-If the first query returns nothing and the second shows no recent rows despite
-daily emails, ingest has been broken and this migration is the fix. Either way
-the migration is idempotent and leaves the database correct. It aborts with a
-clear message if duplicate `(user_id, session_date)` rows exist — reconcile
-those first, keeping the newest per pair.
+If the first returns nothing and the second shows no recent rows despite daily
+emails, ingest has been broken and this migration is the fix. The migration is
+idempotent either way, and it aborts with a clear message if duplicate
+`(user_id, session_date)` rows exist — reconcile those first, keeping the
+newest per pair.
 
 ### Extensions
 
-`migrate-inbound-pipeline-fns.sql` needs two extensions, one click each in
-Database → Extensions: **pg_cron** and **pg_net**.
+The third migration needs **pg_cron** and **pg_net**. It tries
+`create extension if not exists`, which usually succeeds on Supabase. If it
+fails on permissions, enable both with one click each in Database → Extensions
+and re-run `npm run db:push`.
 
 Then set the two database settings the cron jobs read:
 
@@ -54,8 +82,6 @@ alter database postgres set app.settings.cron_secret = '<the CRON_SECRET below>'
 
 Verify: `select jobname, schedule, active from cron.job;` → two rows,
 `tradeladder-sweep` and `tradeladder-watchdog`.
-
----
 
 ## 1. Postmark
 

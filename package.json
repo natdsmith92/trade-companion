@@ -8,7 +8,9 @@
     "start": "next start",
     "test": "node scripts/test-lib.mjs",
     "eval": "node scripts/eval-parser.mjs",
-    "eval:held-out": "node scripts/eval-parser.mjs --held-out"
+    "eval:held-out": "node scripts/eval-parser.mjs --held-out",
+    "db:check": "supabase db push --db-url \"$SUPABASE_DB_URL\" --dry-run",
+    "db:push": "supabase db push --db-url \"$SUPABASE_DB_URL\""
   },
   "dependencies": {
     "@supabase/ssr": "^0.6.1",
@@ -25,6 +27,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "tailwindcss": "^4.1.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "supabase": "^2.116.0"
   }
 }
