@@ -41,6 +41,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
+    // F10: idempotency. If the client supplied a key and a trade already exists
+    // with that key for this user, return the existing row instead of inserting
+    // a duplicate. Covers double-submit during a fast tap or a network retry.
+    const idempotencyKey: string | undefined = body.idempotency_key;
+    if (idempotencyKey) {
+      const { data: existing } = await supabase
+        .from("trades")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("idempotency_key", idempotencyKey)
+        .maybeSingle();
+
+      if (existing) return NextResponse.json(existing);
+    }
+
     const { data, error } = await supabase
       .from("trades")
       .insert({ ...body, user_id: user.id })

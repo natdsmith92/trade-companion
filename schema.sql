@@ -1,21 +1,40 @@
 -- ══════════════════════════════════════════════
--- TradeLadder — Supabase Schema
--- Run this in Supabase Dashboard → SQL Editor
+-- TradeLadder — Supabase Schema (canonical, current state)
+-- Run this on a fresh Supabase project. For an existing project,
+-- run the migrate-*.sql files in chronological order instead.
 -- ══════════════════════════════════════════════
+-- Tables: plans, trades, es_price_cache, monitoring_alerts
+-- Migrations folded in here:
+--   • migrate-session-date.sql      — session_date column on both tables
+--   • migrate-multi-tenant.sql      — user_id + RLS policies
+--   • migrate-trade-idempotency.sql — F10 idempotency_key on trades
+--   • migrate-es-price-cache.sql    — F6 persistent es-price cache
+--   • migrate-monitoring.sql        — F8b monitoring_alerts + pg_cron
+-- TLDR JSONB column on plans is also included (was added directly via
+-- the dashboard; folded in here so a fresh deploy includes it).
+-- PREREQUISITE for F8b: enable pg_cron extension in Supabase
+-- (Database → Extensions → pg_cron → Enable).
 
--- Plans table: stores each daily Mancini email
+-- ───── plans ─────
+-- One row per daily Mancini email per user.
 create table if not exists plans (
   id uuid default gen_random_uuid() primary key,
+  user_id uuid references auth.users(id),
   session_date date not null,
   email_date text not null,
   subject text not null,
   body text not null,
+  -- AI-generated headline + structured TL;DR (TldrData shape).
+  -- Written by /api/tldr, read by TldrTab.
+  tldr jsonb,
   created_at timestamptz default now()
 );
 
--- Trades table: stores trade log entries
+-- ───── trades ─────
+-- One row per logged trade. idempotency_key dedupes double-submits.
 create table if not exists trades (
   id uuid default gen_random_uuid() primary key,
+  user_id uuid references auth.users(id),
   session_date date not null,
   symbol text not null default 'ES',
   direction text not null check (direction in ('long', 'short')),
@@ -27,10 +46,123 @@ create table if not exists trades (
   point_value numeric not null default 50,
   notes text,
   pnl numeric,
+  -- F10: client-supplied UUID for double-submit dedup at the (user_id, key) pair.
+  -- Nullable so legacy rows and admin inserts stay valid.
+  idempotency_key text,
   created_at timestamptz default now()
 );
 
+-- ───── indexes ─────
+create index if not exists idx_plans_user_id on plans (user_id);
 create index if not exists idx_plans_session_date on plans (session_date desc);
 create index if not exists idx_plans_created_at on plans (created_at desc);
+create index if not exists idx_trades_user_id on trades (user_id);
 create index if not exists idx_trades_session_date on trades (session_date desc);
 create index if not exists idx_trades_created_at on trades (created_at desc);
+
+-- F10: only one trade per user can hold a given idempotency_key.
+create unique index if not exists trades_user_idempotency_idx
+  on trades (user_id, idempotency_key)
+  where idempotency_key is not null;
+
+-- ───── row level security ─────
+alter table plans enable row level security;
+alter table trades enable row level security;
+
+create policy "Users can view their own plans"
+  on plans for select
+  using (auth.uid() = user_id);
+
+create policy "Users can insert their own plans"
+  on plans for insert
+  with check (auth.uid() = user_id);
+
+create policy "Users can delete their own plans"
+  on plans for delete
+  using (auth.uid() = user_id);
+
+create policy "Users can view their own trades"
+  on trades for select
+  using (auth.uid() = user_id);
+
+create policy "Users can insert their own trades"
+  on trades for insert
+  with check (auth.uid() = user_id);
+
+create policy "Users can update their own trades"
+  on trades for update
+  using (auth.uid() = user_id);
+
+create policy "Users can delete their own trades"
+  on trades for delete
+  using (auth.uid() = user_id);
+
+-- The service role key bypasses RLS entirely, so the webhook ingest path
+-- (/api/inbound-email once Phase 4 lands, /api/ingest today) keeps working.
+
+-- ───── es_price_cache (F6) ─────
+-- Single-row cache for the live ES quote. Survives Render cold starts and
+-- shares state across instances. RLS denies public access; only the
+-- service role reads/writes it.
+create table if not exists es_price_cache (
+  id integer primary key default 1,
+  price numeric not null default 0,
+  change numeric not null default 0,
+  change_percent numeric not null default 0,
+  market_state text not null default 'CLOSED',
+  updated_at timestamptz not null default now(),
+  constraint es_price_cache_singleton check (id = 1)
+);
+
+alter table es_price_cache enable row level security;
+
+insert into es_price_cache (id) values (1)
+  on conflict (id) do nothing;
+
+-- ───── monitoring_alerts (F8b) ─────
+-- Append-only operational alerts log. Today's only writer is the pg_cron
+-- daily parse-success check. Service-role only via RLS.
+create table if not exists monitoring_alerts (
+  id uuid default gen_random_uuid() primary key,
+  kind text not null,
+  detail text,
+  severity text not null default 'medium' check (severity in ('low', 'medium', 'high', 'critical')),
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_monitoring_alerts_created_at on monitoring_alerts (created_at desc);
+create index if not exists idx_monitoring_alerts_kind on monitoring_alerts (kind);
+
+alter table monitoring_alerts enable row level security;
+
+-- Daily parse-success check (F8b). Requires pg_cron extension enabled
+-- in the Supabase dashboard before this runs.
+create or replace function check_daily_parse_success()
+returns void
+language plpgsql
+security definer
+as $$
+declare
+  today_date date := current_date;
+  plan_count integer;
+begin
+  select count(*) into plan_count
+  from plans
+  where session_date = today_date;
+
+  if plan_count = 0 then
+    insert into monitoring_alerts (kind, detail, severity)
+    values (
+      'parse_missing',
+      'No plan ingested for ' || today_date::text || ' by 14:00 UTC',
+      'high'
+    );
+  end if;
+end;
+$$;
+
+select cron.schedule(
+  'daily-parse-check',
+  '0 14 * * 1-5',
+  $$ select check_daily_parse_success(); $$
+);

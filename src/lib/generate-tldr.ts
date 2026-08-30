@@ -102,6 +102,8 @@ export async function generateTldr(
   planId: string,
   emailBody: string
 ): Promise<TldrData | null> {
+  // env.ts validates at server start; we re-read to keep this function
+  // testable without a global mock.
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     console.error("OPENAI_API_KEY not set — skipping TL;DR generation");
