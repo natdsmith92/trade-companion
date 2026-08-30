@@ -371,6 +371,37 @@ different economic regime.
 - **The dark-theme graft onto MakerKit's shadcn/Tailwind defaults is unscoped and has had
   no design review** — it is the most user-visible part of the migration.
 
+## Implementation status (updated 2026-08-30, autonomous build)
+
+Phase 0 and Phase 1 are built, typechecked, built clean, and unit-tested.
+Everything remaining needs an account or a real email — see
+`docs/INBOUND-SETUP.md` for the runbook.
+
+| Item | Status |
+|---|---|
+| 0.0 Merge `claude/gallant-faraday-fd559d` | DONE — merged to main, CLAUDE.md conflict resolved keeping both sections |
+| 0.0b Remove duplicate clone | DONE — `.env.local` copied up first and verified byte-identical; it was the sole cause of 3 typecheck errors |
+| 0.1 Split/secure `/api/ingest` | ALREADY DONE by the merged F2 commit — route is authenticated, out of `publicPaths`, derives `user_id` from session. Only a machine endpoint was missing, and `/api/inbound` is now it |
+| 0.2 Verify Gmail gates | BLOCKED — needs a real forward through Postmark. `INBOUND_TEST_MODE` ships so the pipeline can run before this is settled |
+| 0.3 Eval corpus | BLOCKED — needs `plans.body` export from Supabase. Harness and fixture format ready |
+| 0.4 Shared LLM helper | DONE — `src/lib/llm.ts` |
+| 0.5 LLM parser + eval runner | DONE — `src/lib/parse-plan-llm.ts`, `scripts/eval-parser.mjs` |
+| 1.x Inbound pipeline | DONE — `/api/inbound`, `/api/cron/sweep`, `claim_pending_email()`, pg_cron schedules |
+| Reliability layer | DONE — watchdog, three morning states, ingest inbox |
+| Postmark account + DNS | BLOCKED — account creation |
+| Phase 2 MakerKit scaffold | NOT STARTED — needs the private repo and a new Supabase/Vercel project |
+
+**Discovered during the build, not in any review:** `/api/ingest` upserts with
+`onConflict: "user_id,session_date"` but no committed SQL has ever created that
+unique index. Either it was applied by hand in the dashboard, or every ingest
+upsert has been failing with `42P10`. `migrate-plans-unique.sql` fixes it either
+way and carries the query that tells you which was true.
+
+**Deploy hazard:** the merged F2 commit made `/api/ingest` authenticated.
+Production still runs the older public version, so deploying the merge breaks
+Zapier unless the Postmark pipeline ships in the same deploy. Covered in
+`docs/INBOUND-SETUP.md` step 7.
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
