@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { callLLMJson } from "./llm";
 
 // Decides whether an inbound email is TODAY'S TRADE PLAN, something else from
@@ -91,20 +92,13 @@ Set "confident": false if you genuinely cannot tell. It is far better to admit
 uncertainty than to guess, because misclassifying a recap as a plan would
 overwrite the levels a trader is actively using.`;
 
-interface ClassifyShape {
-  classification: "plan" | "not_plan";
-  confident?: boolean;
-  reason?: string;
-}
-
-function validateShape(parsed: unknown): ClassifyShape {
-  const p = parsed as ClassifyShape;
-  if (!p || typeof p !== "object") throw new Error("not an object");
-  if (p.classification !== "plan" && p.classification !== "not_plan") {
-    throw new Error(`classification must be "plan" or "not_plan", got ${String(p.classification)}`);
-  }
-  return p;
-}
+const ClassifySchema = z.object({
+  classification: z.enum(["plan", "not_plan"]),
+  // Required, not optional: an omitted "confident" would default to confident,
+  // which defeats the point of asking.
+  confident: z.boolean(),
+  reason: z.string(),
+});
 
 /**
  * Cheap subject-line pass. Returns null when the subject is not decisive,
@@ -146,17 +140,20 @@ export async function classifyEmail(
     };
   }
 
-  const llm = await callLLMJson<ClassifyShape>({
+  const llm = await callLLMJson({
     label: "classify-email",
     system: SYSTEM_PROMPT,
     // Classification needs the shape of the email, not all of it. Truncating
     // keeps this call fast, which matters because it shares the sweep's
     // timeout budget with the parse call.
     user: `Subject: ${subject || "(none)"}\n\n${body.slice(0, 4000)}`,
-    reasoningEffort: "low",
-    maxCompletionTokens: 2000,
+    // Same model as the parser, less deliberation: this is a binary call on a
+    // known sender, and it sits in front of the parse call in the sweep's
+    // timeout budget.
+    effort: "low",
+    maxTokens: 2000,
     timeoutMs: 30_000,
-    validate: validateShape,
+    schema: ClassifySchema,
   });
 
   if (!llm.ok) {
@@ -172,13 +169,13 @@ export async function classifyEmail(
     return {
       classification: "quarantine",
       source: "llm",
-      reason: `classifier was not confident: ${llm.data.reason ?? "no reason given"}`,
+      reason: `classifier was not confident: ${llm.data.reason || "no reason given"}`,
     };
   }
 
   return {
     classification: llm.data.classification,
     source: "llm",
-    reason: llm.data.reason ?? "classified by model",
+    reason: llm.data.reason || "classified by model",
   };
 }

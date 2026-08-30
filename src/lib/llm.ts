@@ -1,50 +1,60 @@
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import type { z } from "zod";
 
-// Shared LLM call surface for every OpenAI JSON call in the app.
+// Shared LLM call surface. Claude (Anthropic SDK) for every model call.
 //
 // WHY A DISCRIMINATED RESULT INSTEAD OF `null`
-// generate-tldr.ts returns bare `null` on every distinct failure: missing key,
-// empty completion, invalid structure. That is fine for an optional TL;DR and
-// wrong everywhere else, because the ingest pipeline's retry rule is
-// "retry transient failures twice, never retry a schema rejection, then fall
-// back to the regex parser". A caller holding `null` cannot tell a timeout
-// (retry) from a malformed response (do not retry), so the rule silently
-// degrades into "any failure falls back immediately" and the LLM parser's
-// advantage is burned on blips.
+// The ingest pipeline's rule is "retry transient failures twice, never retry a
+// schema rejection, then fall back to the regex parser". A caller holding a
+// bare `null` cannot tell a timeout (retry) from a malformed response (do not
+// retry), so the rule silently degrades into "any failure falls back
+// immediately" and the LLM parser's advantage is burned on blips.
 //
 //   callLLMJson()
-//     ├── ok:true  ──▶ data (already passed the caller's validator)
+//     ├── ok:true  ──▶ data, already validated against the Zod schema
 //     └── ok:false ──▶ reason:
 //                        no_key    — env not configured; never retryable
 //                        timeout   — network/timeout/5xx/429; retryable
-//                        refusal   — model returned nothing; not retryable
-//                        malformed — unparseable or failed validation; not retryable
+//                        refusal   — safety decline or empty turn; not retryable
+//                        malformed — schema mismatch after parsing; not retryable
 //
-// Retry policy lives here so it is written once and testable without a network.
+// WHY STRUCTURED OUTPUTS AND NOT PROMPT-FOR-JSON
+// Claude constrains the response to the schema server-side via
+// `output_config.format`, and `messages.parse()` returns it already typed. That
+// removes the whole class of "asked for JSON, got prose with JSON inside it"
+// failures. Note the assistant-prefill trick (seeding a `{`) that older
+// guides recommend is REJECTED with a 400 on current models — structured
+// outputs is the supported replacement, not a nicety.
+//
+// MODEL
+// claude-opus-5 for everything. Volume here is one to three emails a day, so
+// the cost difference against a smaller model is pennies, while a misread
+// price level is money. Depth is tuned per call site with `effort` instead:
+// the classifier runs `low`, the parser runs `high`.
 
 export type LLMFailureReason = "no_key" | "timeout" | "refusal" | "malformed";
 
 export type LLMResult<T> =
-  | { ok: true; data: T; raw: string }
+  | { ok: true; data: T }
   | { ok: false; reason: LLMFailureReason; detail: string };
 
-export interface LLMCallOptions<T> {
-  /** System prompt. */
+export const DEFAULT_MODEL = "claude-opus-5";
+
+export interface LLMCallOptions<S extends z.ZodType> {
+  /** System prompt. Top-level on Anthropic, not a message with role "system". */
   system: string;
   /** User content (typically the email body). */
   user: string;
-  /**
-   * Narrowing validator. Return the typed value, or throw to signal the
-   * response was structurally wrong. Throwing yields reason:"malformed".
-   */
-  validate: (parsed: unknown) => T;
+  /** Zod schema. The response is constrained to it and returned typed. */
+  schema: S;
   model?: string;
-  maxCompletionTokens?: number;
+  maxTokens?: number;
   /**
-   * OpenAI reasoning effort. Defaults to "high" to match generate-tldr.ts.
-   * Note that "high" is a 30-60s call — the sweep budgets for this.
+   * Thinking depth and overall token spend: low | medium | high | xhigh | max.
+   * Not a model downgrade — same model, less deliberation.
    */
-  reasoningEffort?: "low" | "medium" | "high";
+  effort?: "low" | "medium" | "high" | "xhigh" | "max";
   /** Retries for transient failures only. Default 2. */
   maxRetries?: number;
   /** Per-attempt timeout in ms. Default 90s. */
@@ -56,105 +66,124 @@ export interface LLMCallOptions<T> {
 const RETRYABLE: LLMFailureReason[] = ["timeout"];
 
 function classifyError(err: unknown): { reason: LLMFailureReason; detail: string } {
-  const e = err as { status?: number; name?: string; message?: string };
-  const message = e?.message ?? String(err);
-
-  // Abort from our own timeout, plus transport-level failures.
-  if (e?.name === "AbortError" || /timeout|ETIMEDOUT|ECONNRESET|ENOTFOUND|fetch failed/i.test(message)) {
+  // Typed SDK errors first — string-matching messages is how this rots.
+  if (err instanceof Anthropic.RateLimitError) {
+    return { reason: "timeout", detail: `rate limited: ${err.message}` };
+  }
+  if (err instanceof Anthropic.APIConnectionError) {
+    return { reason: "timeout", detail: `connection: ${err.message}` };
+  }
+  if (err instanceof Anthropic.APIError) {
+    const status = err.status ?? 0;
+    // 5xx is worth another attempt; 4xx will reproduce exactly.
+    return {
+      reason: status >= 500 ? "timeout" : "malformed",
+      detail: `HTTP ${status}: ${err.message}`,
+    };
+  }
+  const message = (err as Error)?.message ?? String(err);
+  if (/abort|timeout|ETIMEDOUT|ECONNRESET|fetch failed/i.test(message)) {
     return { reason: "timeout", detail: message };
   }
-  // Rate limit and server errors are worth another attempt.
-  if (e?.status === 429 || (typeof e?.status === "number" && e.status >= 500)) {
-    return { reason: "timeout", detail: `HTTP ${e.status}: ${message}` };
-  }
-  // 4xx other than 429 is a request problem; retrying reproduces it.
   return { reason: "malformed", detail: message };
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function callLLMJson<T>(opts: LLMCallOptions<T>): Promise<LLMResult<T>> {
+export async function callLLMJson<S extends z.ZodType>(
+  opts: LLMCallOptions<S>,
+): Promise<LLMResult<z.infer<S>>> {
   const {
     system,
     user,
-    validate,
-    model = "gpt-5.5",
-    maxCompletionTokens = 16000,
-    reasoningEffort = "high",
+    schema,
+    model = DEFAULT_MODEL,
+    maxTokens = 16000,
+    effort = "high",
     maxRetries = 2,
     timeoutMs = 90_000,
     label,
   } = opts;
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return { ok: false, reason: "no_key", detail: "OPENAI_API_KEY not set" };
+    return { ok: false, reason: "no_key", detail: "ANTHROPIC_API_KEY not set" };
   }
 
-  const client = new OpenAI({ apiKey });
+  // Identity-linked keys must name the workspace the request acts in, or the
+  // API rejects every call with a 400. Plain org keys do not need this, so the
+  // header is only sent when configured. The failure without it is unhelpfully
+  // generic at the call site — it surfaces as a malformed 400 — which is why
+  // it is worth handling explicitly here.
+  const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID;
+
+  const client = new Anthropic({
+    apiKey,
+    timeout: timeoutMs,
+    // Retries are handled in the loop below so the reason classification and
+    // backoff stay in one place.
+    maxRetries: 0,
+    ...(workspaceId
+      ? { defaultHeaders: { "anthropic-workspace-id": workspaceId } }
+      : {}),
+  });
   let last: { reason: LLMFailureReason; detail: string } = {
     reason: "timeout",
     detail: "no attempt made",
   };
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
     try {
-      const completion = await client.chat.completions.create(
-        {
-          model,
-          max_completion_tokens: maxCompletionTokens,
-          reasoning_effort: reasoningEffort,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
-        },
-        { signal: controller.signal },
-      );
+      const response = await client.messages.parse({
+        model,
+        max_tokens: maxTokens,
+        // Thinking is on by default on this model family. budget_tokens was
+        // removed and returns a 400 — depth is controlled by effort below.
+        output_config: { effort, format: zodOutputFormat(schema) },
+        system,
+        messages: [{ role: "user", content: user }],
+      });
 
-      const raw = completion.choices[0]?.message?.content?.trim();
-      if (!raw) {
-        // The model produced nothing. Retrying a refusal reproduces it.
+      // A safety decline returns HTTP 200 with no usable content, so this has
+      // to be checked before reading the result rather than caught.
+      if (response.stop_reason === "refusal") {
         return {
           ok: false,
           reason: "refusal",
-          detail: `${label}: empty completion`,
+          detail:
+            `${label}: declined` +
+            (response.stop_details
+              ? ` (${response.stop_details.category ?? "uncategorized"})`
+              : ""),
         };
       }
 
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch (e) {
+      // Truncation means the schema was probably not completed. Treat it as
+      // malformed rather than pretending a partial answer is an answer.
+      if (response.stop_reason === "max_tokens") {
         return {
           ok: false,
           reason: "malformed",
-          detail: `${label}: response was not valid JSON: ${(e as Error).message}`,
+          detail: `${label}: hit max_tokens (${maxTokens}) before completing the response`,
         };
       }
 
-      try {
-        return { ok: true, data: validate(parsed), raw };
-      } catch (e) {
+      const parsed = response.parsed_output;
+      if (parsed == null) {
         return {
           ok: false,
           reason: "malformed",
-          detail: `${label}: failed validation: ${(e as Error).message}`,
+          detail: `${label}: response did not parse against the schema`,
         };
       }
+
+      return { ok: true, data: parsed as z.infer<S> };
     } catch (err) {
       last = classifyError(err);
       if (!RETRYABLE.includes(last.reason) || attempt === maxRetries) {
         return { ok: false, reason: last.reason, detail: `${label}: ${last.detail}` };
       }
-      // Exponential backoff: 1s, 2s.
-      await sleep(1000 * Math.pow(2, attempt));
-    } finally {
-      clearTimeout(timer);
+      await sleep(1000 * Math.pow(2, attempt)); // 1s, 2s
     }
   }
 

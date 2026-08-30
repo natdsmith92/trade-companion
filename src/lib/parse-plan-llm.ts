@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { callLLMJson, LLMFailureReason } from "./llm";
 import { parseLevels } from "./parser";
 import { verifyAgainstSource, VerificationResult } from "./verify-levels";
@@ -75,36 +76,29 @@ Rules:
   is more useful than being decisive.
 - If the email is not a trade plan at all, return empty arrays.`;
 
-interface LLMLevel {
-  price: number;
-  major?: boolean;
-  confident?: boolean;
-}
+// The response is constrained to this schema server-side, so the hand-rolled
+// validator this replaced is gone: malformed shapes cannot come back at all.
+const LevelSchema = z.object({
+  price: z.number(),
+  major: z.boolean(),
+  // Deliberately required, not optional. Made optional, the model omits it and
+  // every level silently reads as confident — which is the opposite of the
+  // caution this field exists to capture.
+  confident: z.boolean(),
+});
 
-interface LLMPlanShape {
-  sessionDate: string;
-  supports: LLMLevel[];
-  resistances: LLMLevel[];
-  lean?: string;
-  bullTargets?: number[];
-  bearTargets?: number[];
-  triggers?: string[];
-}
+const PlanSchema = z.object({
+  sessionDate: z.string(),
+  supports: z.array(LevelSchema),
+  resistances: z.array(LevelSchema),
+  lean: z.string(),
+  bullTargets: z.array(z.number()),
+  bearTargets: z.array(z.number()),
+  triggers: z.array(z.string()),
+});
 
-function validateShape(parsed: unknown): LLMPlanShape {
-  const p = parsed as LLMPlanShape;
-  if (!p || typeof p !== "object") throw new Error("not an object");
-  if (!Array.isArray(p.supports) || !Array.isArray(p.resistances)) {
-    throw new Error("supports and resistances must both be arrays");
-  }
-  for (const lvl of [...p.supports, ...p.resistances]) {
-    if (typeof lvl?.price !== "number" || !Number.isFinite(lvl.price)) {
-      throw new Error(`level price is not a finite number: ${JSON.stringify(lvl)}`);
-    }
-  }
-  if (typeof p.sessionDate !== "string") throw new Error("sessionDate must be a string");
-  return p;
-}
+type LLMPlanShape = z.infer<typeof PlanSchema>;
+type LLMLevel = z.infer<typeof LevelSchema>;
 
 function toLevels(items: LLMLevel[], type: "support" | "resistance"): Level[] {
   return items.map((l) => ({ price: l.price, type, major: !!l.major }));
@@ -126,11 +120,12 @@ export async function parsePlanFromEmail(
   body: string,
   subject?: string,
 ): Promise<ParseOutcome> {
-  const llm = await callLLMJson<LLMPlanShape>({
+  const llm = await callLLMJson({
     label: "parse-plan",
     system: SYSTEM_PROMPT,
     user: `Subject: ${subject ?? "(none)"}\n\n${body}`,
-    validate: validateShape,
+    schema: PlanSchema,
+    effort: "high", // extraction accuracy is the whole point of this call
   });
 
   if (llm.ok) {
@@ -138,10 +133,10 @@ export async function parsePlanFromEmail(
     const plan: ParsedPlan = {
       supports: toLevels(p.supports, "support"),
       resistances: toLevels(p.resistances, "resistance"),
-      lean: p.lean ?? "",
-      bullTargets: p.bullTargets ?? [],
-      bearTargets: p.bearTargets ?? [],
-      triggers: p.triggers ?? [],
+      lean: p.lean,
+      bullTargets: p.bullTargets,
+      bearTargets: p.bearTargets,
+      triggers: p.triggers,
       sessionDate: p.sessionDate,
     };
 
@@ -187,7 +182,9 @@ export async function parsePlanFromEmail(
       banner:
         reason === "no_key"
           ? "Basic parse — AI parsing is not configured. Levels come from pattern matching."
-          : "Basic parse — AI parsing was unavailable. Levels come from pattern matching; double-check before trading.",
+          : reason === "refusal"
+            ? "Basic parse — the AI declined this email. Levels come from pattern matching; double-check before trading."
+            : "Basic parse — AI parsing was unavailable. Levels come from pattern matching; double-check before trading.",
     };
   }
 
