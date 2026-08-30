@@ -10,10 +10,24 @@ import { Level, ParsedPlan } from "./types";
 // this is proof, costs zero API calls, and runs in milliseconds.
 //
 // WHAT IT DOES NOT CATCH
-// Omissions. A level present in the email that the parser skipped looks
-// identical to a level that was never there. Coverage for that comes from the
-// eval suite (scripts/eval-parser.mjs) and the user's inline confidence
-// corrections, not from here.
+//
+// 1. Omissions. A level present in the email that the parser skipped looks
+//    identical to a level that was never there. Measured instead by the eval
+//    suite and by the user's inline confidence corrections. This is not
+//    hypothetical: on one real email the regex parser found 34 levels where
+//    the LLM found 67, and verification passed both, because everything each
+//    reported was genuinely in the text.
+//
+// 2. A MISREAD date, as opposed to an invented one. Observed for real:
+//    "Can Bulls Finish Off the July 4th Week Strong? July 2nd Plan" — the
+//    regex parser returned July 4th, having matched the first date in the
+//    subject rather than the one naming the session. dateAppearsInSource()
+//    returns true, correctly: July 4th IS in the text. The check can prove a
+//    date was not fabricated; it cannot prove the right date was chosen.
+//    That plan would have been filed one session late, silently.
+//
+//    This is a large part of why the LLM is the primary parser and the regex
+//    path is bannered as degraded rather than treated as equivalent.
 //
 // WHY "DERIVABLE" AND NOT "VERBATIM"  ← the correction that matters
 // A first pass of this design required every level to appear verbatim in the
