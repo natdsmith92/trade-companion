@@ -1,4 +1,5 @@
-import OpenAI from "openai";
+import { z } from "zod";
+import { callLLMJson } from "./llm";
 import { createAdminSupabase } from "./supabase-server";
 import { TldrData } from "./tldr-types";
 
@@ -98,59 +99,79 @@ Rules for fbSetups:
 - If no FB setups are mentioned, return an empty array []
 - Wrap prices in <span class="num">PRICE</span>, key actions in <strong>bold</strong>`;
 
+
+// Mirrors TldrData in tldr-types.ts. The response is constrained to this
+// server-side, which replaces the hand-rolled shape checks this function used
+// to run after JSON.parse — a malformed structure can no longer come back.
+//
+// fbSetups is required here even though TldrData marks it optional: an
+// optional field is one the model simply omits, and "no failed-breakdown
+// setups today" is a real answer worth distinguishing from "the model forgot".
+// An empty array says it looked and found none.
+const TldrSchema = z.object({
+  headline: z.string(),
+  stats: z.array(
+    z.object({
+      label: z.string(),
+      value: z.string(),
+      color: z.enum(["bull", "bear", "gold", "blue"]),
+      subtitle: z.string(),
+    }),
+  ),
+  sections: z.array(
+    z.object({
+      title: z.string(),
+      icon: z.string(),
+      color: z.enum(["bear", "bull", "gold", "blue"]),
+      insights: z.array(
+        z.object({
+          tag: z.string(),
+          tagType: z.enum(["caution", "opportunity", "context", "key"]),
+          text: z.string(),
+        }),
+      ),
+    }),
+  ),
+  fbSetups: z.array(
+    z.object({
+      level: z.number(),
+      quality: z.enum(["A+", "A", "B", "Watch"]),
+      action: z.string(),
+      context: z.string(),
+      invalidation: z.string(),
+    }),
+  ),
+});
+
 export async function generateTldr(
   planId: string,
   emailBody: string
 ): Promise<TldrData | null> {
-  // env.ts validates at server start; we re-read to keep this function
-  // testable without a global mock.
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    console.error("OPENAI_API_KEY not set — skipping TL;DR generation");
+  // Routed through the shared helper so this call site gets the same retry
+  // policy, typed failure reasons, and schema-constrained output as the parser
+  // and classifier. Previously this inlined its own OpenAI client and returned
+  // a bare null on every distinct failure.
+  const llm = await callLLMJson({
+    label: "generate-tldr",
+    system: SYSTEM_PROMPT,
+    user: `Here is today's Mancini email. Generate the TL;DR JSON:
+
+${emailBody}`,
+    schema: TldrSchema,
+    effort: "high",
+  });
+
+  if (!llm.ok) {
+    // TL;DR is a nice-to-have layered on top of a plan that already published,
+    // so failing quietly is correct here — unlike the parser, where a silent
+    // failure would mean trading off levels nobody checked.
+    console.error(`TL;DR generation skipped (${llm.reason}): ${llm.detail}`);
     return null;
   }
 
-  const client = new OpenAI({ apiKey });
+  const tldr = llm.data as TldrData;
 
   try {
-    const completion = await client.chat.completions.create({
-      model: "gpt-5.5",
-      max_completion_tokens: 16000,
-      reasoning_effort: "high",
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: `Here is today's Mancini email. Generate the TL;DR JSON:\n\n${emailBody}`,
-        },
-      ],
-    });
-
-    const raw = completion.choices[0]?.message?.content?.trim();
-    if (!raw) {
-      console.error("No content in OpenAI response");
-      return null;
-    }
-
-    const tldr: TldrData = JSON.parse(raw);
-
-    // Validate basic structure
-    if (!tldr.stats || !tldr.sections || !Array.isArray(tldr.stats) || !Array.isArray(tldr.sections)) {
-      console.error("Invalid TL;DR structure from OpenAI");
-      return null;
-    }
-
-    // Ensure fbSetups is at least an empty array
-    if (!tldr.fbSetups || !Array.isArray(tldr.fbSetups)) {
-      tldr.fbSetups = [];
-    }
-
-    // Ensure headline has a fallback
-    if (!tldr.headline || typeof tldr.headline !== "string") {
-      tldr.headline = "";
-    }
-
     // Write to database
     const supabase = createAdminSupabase();
     const { error } = await supabase

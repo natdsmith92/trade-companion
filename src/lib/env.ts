@@ -7,14 +7,14 @@ interface ServerEnv {
   NEXT_PUBLIC_SUPABASE_URL: string;
   NEXT_PUBLIC_SUPABASE_ANON_KEY: string;
   SUPABASE_SERVICE_KEY: string;
-  OPENAI_API_KEY: string;
+  ANTHROPIC_API_KEY: string;
 }
 
 const REQUIRED: (keyof ServerEnv)[] = [
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
   "SUPABASE_SERVICE_KEY",
-  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
 ];
 
 // Throws if any required key is missing. Called by instrumentation.ts.
@@ -30,7 +30,7 @@ export function assertEnv(): ServerEnv {
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL!,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY!,
-    OPENAI_API_KEY: process.env.OPENAI_API_KEY!,
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY!,
   };
 }
 
@@ -41,6 +41,6 @@ export function envStatus(): Record<keyof ServerEnv, boolean> {
     NEXT_PUBLIC_SUPABASE_URL: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     SUPABASE_SERVICE_KEY: !!process.env.SUPABASE_SERVICE_KEY,
-    OPENAI_API_KEY: !!process.env.OPENAI_API_KEY,
+    ANTHROPIC_API_KEY: !!process.env.ANTHROPIC_API_KEY,
   };
 }

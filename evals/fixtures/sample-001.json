@@ -1,0 +1,11 @@
+{
+  "name": "sample-range-shorthand",
+  "heldOut": false,
+  "subject": "ES Trade Plan for 9/15",
+  "body": "Good morning. Supports are: 6685 (major), 6676, 6663 (major), 6650. Resistances are: 6700 (major), 6716, 6778-82, 6820-6822. Lean is bullish above 6700.",
+  "expected": {
+    "sessionDate": "2026-09-15",
+    "supports": [6685, 6676, 6663, 6650],
+    "resistances": [6700, 6716, 6778, 6782, 6820, 6822]
+  }
+}

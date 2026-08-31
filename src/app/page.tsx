@@ -5,6 +5,7 @@ import LevelLadder from "@/components/LevelLadder";
 import GamePlan from "@/components/GamePlan";
 import TldrTab from "@/components/TldrTab";
 import PasteModal from "@/components/PasteModal";
+import SessionBanner from "@/components/SessionBanner";
 import {
   TradeBar,
   TradeStats,
@@ -57,6 +58,9 @@ export default function Dashboard() {
 
   const [activeTab, setActiveTab] = useState<Tab>("plan");
   const [showPaste, setShowPaste] = useState(false);
+  // Bumped after a paste so SessionBanner re-resolves: a pasted plan must clear
+  // a "did not import" banner immediately, not on next navigation.
+  const [bannerKey, setBannerKey] = useState(0);
   const [showNewTrade, setShowNewTrade] = useState(false);
   const [editTradeId, setEditTradeId] = useState<string | null>(null);
   const editTrade = trades.find((t) => t.id === editTradeId) || null;
@@ -70,6 +74,7 @@ export default function Dashboard() {
     : "—";
 
   function handlePaste(text: string) {
+    setBannerKey((k) => k + 1);
     ingestPaste(text);
     setShowPaste(false);
   }
@@ -96,6 +101,14 @@ export default function Dashboard() {
         userEmail={userEmail}
         onSignOut={signOut}
       />
+
+      <ErrorBoundary label="Session Banner">
+        <SessionBanner
+          sessionDate={sessionDate}
+          onPaste={() => setShowPaste(true)}
+          refreshKey={bannerKey}
+        />
+      </ErrorBoundary>
 
       <div className="main">
         <ErrorBoundary label="Level Ladder">

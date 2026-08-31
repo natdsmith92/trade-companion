@@ -1252,3 +1252,71 @@ input::placeholder {
   font-size: 12px;
 }
 
+
+/* ── Session banner ──
+   Says what is happening with today's plan. Three states, deliberately
+   distinguishable at a glance from across a desk during pre-market:
+     waiting  gold, informational  — nothing has arrived yet
+     error    red, demands action  — arrived and did NOT publish
+     closed   muted, reassuring    — market is shut, nothing is wrong
+   The error state must never be mistaken for waiting. That confusion is the
+   exact bug this component was added to fix. */
+.session-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--bs);
+  font-size: 14px;
+  line-height: 1.4;
+}
+.session-banner strong {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.session-banner span {
+  color: var(--t2);
+}
+.session-banner__action {
+  margin-left: auto;
+  background: var(--bg-3);
+  color: var(--t1);
+  border: 1px solid var(--bm);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.session-banner__action:hover {
+  background: var(--bg-4);
+  border-color: var(--bx);
+}
+.session-banner--waiting {
+  background: rgba(251, 191, 36, 0.07);
+  border-bottom-color: rgba(251, 191, 36, 0.25);
+}
+.session-banner--waiting strong { color: var(--gold); }
+
+.session-banner--error {
+  background: var(--bear-bg);
+  border-bottom-color: var(--bear-d);
+}
+.session-banner--error strong { color: var(--bear); }
+.session-banner--error .session-banner__action {
+  border-color: var(--bear-d);
+}
+
+.session-banner--closed,
+.session-banner--info {
+  background: var(--bg-2);
+}
+.session-banner--closed strong,
+.session-banner--info strong { color: var(--t2); }
+
+@media (max-width: 640px) {
+  .session-banner { padding: 10px 14px; font-size: 13px; }
+  .session-banner__action { margin-left: 0; width: 100%; }
+}
