@@ -185,6 +185,9 @@ export async function POST(req: NextRequest) {
       envelope_sender: payload.From ?? null,
       subject: payload.Subject ?? null,
       body,
+      // Kept because sender verification runs later, in the sweep, and DKIM
+      // exists only here. Dropping it made every genuine forward quarantine.
+      headers: payload.Headers ?? null,
       status: "pending",
     });
 

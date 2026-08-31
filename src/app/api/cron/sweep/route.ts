@@ -58,6 +58,7 @@ interface EmailRow {
   body: string;
   from_email: string | null;
   envelope_sender: string | null;
+  headers: Array<{ Name: string; Value: string }> | null;
   attempts: number;
 }
 
@@ -120,6 +121,9 @@ export async function GET(req: NextRequest) {
       // Required for forwarded mail: the newsletter's address survives only
       // inside the body's forwarded-header block, never in the headers.
       body: email.body,
+      // And DKIM survives only in the headers, never in the body. Both halves
+      // of the two-layer check need their own source.
+      headers: email.headers,
       allowedForwarder: route?.allowed_forwarder ?? null,
       allowedFrom: route?.allowed_from ?? null,
     });
